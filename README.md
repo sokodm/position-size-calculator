@@ -11,9 +11,10 @@ no account, no sign-up, and your numbers never leave the computer.
 > for every order you place. The software comes with no warranty of any kind —
 > see [LICENSE](LICENSE).
 
-<!-- Screenshot: add a PNG of the app with a portfolio size set and two or three
-     positions loaded, then reference it here as:
-     ![Position Size Calculator](docs/screenshot.png) -->
+![The calculator with three crypto positions loaded. Portfolio size and risk
+percentage sit in the left sidebar; the highlighted Stop Price, Position Size
+and Tranche Size columns are the calculated outputs, and the columns to their
+right show the inputs and the ATR they were derived from.](docs/screenshot.png)
 
 ## What it works out
 
