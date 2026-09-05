@@ -140,6 +140,28 @@ The `.venv` folder is roughly **700 MB** and is built for the OS that created
 it. It is gitignored, and copying it between machines will not work — let each
 machine build its own on first launch.
 
+Most of that size is not this app. `streamlit-extras` pulls in around 120
+transitive packages, including a Snowflake connector, the AWS SDK, matplotlib
+and plotly — none of which this calculator uses directly. That is worth knowing
+before you install it: it is a large surface for a local tool. `pip install
+--dry-run -r requirements.txt` prints the full tree if you want to read it
+first.
+
+## Tests
+
+Plain scripts, no test framework to install:
+
+```sh
+python3 tests/test_state.py     # state, validation, sizing maths. No network.
+python3 tests/test_lookup.py    # symbol search and refresh. Needs network.
+```
+
+`test_state.py` runs in CI on Ubuntu and Windows, against Python 3.10 (the
+floor this project supports) and 3.12. `test_lookup.py` calls TradingView and
+is run by hand. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for how the tests reach into `app.py`
+without a Streamlit runtime.
+
 ## License
 
 [MIT](LICENSE).

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only: this workflow runs tests and never writes to the repo. Stated
+# explicitly so a fork's default token cannot do more than it needs.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # Both are launcher targets, so both get tested. 3.10 is the floor the
+    # README promises; 3.12 is what a fresh install gets today.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Byte-compile every source file
+        run: python -m compileall -q app.py run.py tests
+
+      - name: State, validation and sizing maths
+        run: python tests/test_state.py
+
+# tests/test_lookup.py is deliberately absent from this workflow. It calls
+# TradingView, so a red build would as often mean "the API was slow" as "the
+# code broke" -- and a suite that cries wolf gets ignored. Run it locally when
+# touching the search or refresh paths.
