@@ -1723,10 +1723,10 @@ st.markdown(
     [data-testid="stSidebar"] {
         --pf-control-w: 155px;
     }
-    /* Explicit sidebar grey: Streamlit's default #f0f2f6 (1.121:1 against the
-       white main area) did not read as grey enough for this app's owner, who
-       asked for it repeatedly. #e5e9f0 is 1.218:1 -- #dee2eb was tried first
-       and rejected as too dark. Deliberately NOT applied to
+    /* Explicit sidebar grey: Streamlit's default #f0f2f6 barely separates from
+       the white main area (1.121:1), so the sidebar does not read as a distinct
+       panel. #e5e9f0 is 1.218:1 -- #dee2eb was tried first and rejected as too
+       dark. Deliberately NOT applied to
        [data-testid="stApp"], which is the single element the whole page's white
        comes from (the view container, main block and header are all
        transparent) -- painting that grey would dissolve the main-area fields,
