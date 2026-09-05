@@ -492,7 +492,13 @@ def _atomic_write(state: dict) -> None:
         # destination inherits *its* mode (0600 from mkstemp) -- without this
         # the file's permissions came from the umask instead, quietly widening
         # a deliberately chmod-ed positions.json back to world-readable.
-        os.fchmod(fd, 0o600)
+        # fchmod is Unix-only (the os docs say "Availability: Unix") and this
+        # app supports Python 3.10+, so on Windows the attribute is absent and
+        # calling it raises AttributeError -- which save_state() does not catch,
+        # crashing the page on a user's very first save. There is no POSIX mode
+        # to widen there anyway: the file inherits its parent directory's ACL.
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as fh:
             # allow_nan=False: Python emits bare NaN/Infinity, which no other
             # JSON reader accepts. Better to refuse the write (the good file
