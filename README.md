@@ -1,8 +1,7 @@
 # Position Size Calculator
 
-Works out how big a position to take, from your portfolio size, the risk you
-accept per trade, and the instrument's ATR. Runs entirely on your own machine —
-no account, no sign-up, and your numbers never leave the computer.
+Auto-calculated ATR sets your stop price and position size — capping your loss
+on any trade at the risk % you set.
 
 > **Not financial advice.** This is a calculator, not a recommendation. It tells
 > you what a position size *would* be under the risk rule you gave it; it has no
@@ -15,6 +14,20 @@ no account, no sign-up, and your numbers never leave the computer.
 percentage sit in the left sidebar; the highlighted Stop Price, Position Size
 and Tranche Size columns are the calculated outputs, and the columns to their
 right show the inputs and the ATR they were derived from.](docs/screenshot.png)
+
+## How it works
+
+- **ATR (Average True Range, 14-period)** — TradingView's average of each bar's
+  true trading range on the selected timeframe: Hourly, Daily, and Weekly
+  measure typical hour-, day-, or week-sized moves.
+- **Stop distance = ATR × ATR multiple**; stop price = entry − stop distance.
+- **Position size** is set so a stop-out loses exactly your Risk % of the
+  portfolio, then split across # Tranches.
+- **Live data** — price & ATR are pulled from TradingView when a position is
+  added and on every refresh.
+- **Global settings apply instantly** — Portfolio Size and Risk (%) re-compute
+  every saved position on the spot; switching the ATR timeframe automatically
+  re-pulls live price & ATR for all saved positions.
 
 ## What it works out
 
