@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""One-command launcher for the Position Size Calculator (macOS + Windows).
+
+Creates a private virtual environment beside this file, installs the pinned
+dependencies, starts Streamlit on a free port and opens the browser. Safe to
+re-run: the install is skipped unless requirements.txt actually changed.
+
+Everything resolves relative to THIS file, so the folder can be moved or
+renamed and can sit at a path containing spaces -- which is also why every
+subprocess call passes an argument list rather than a shell string.
+"""
+import hashlib
+import os
+import socket
+import subprocess
+import sys
+import time
+import webbrowser
+from pathlib import Path
+
+MIN_PYTHON = (3, 10)
+PREFERRED_PORT = 8765
+STARTUP_TIMEOUT_S = 120
+
+HERE = Path(__file__).resolve().parent
+APP = HERE / "app.py"
+REQUIREMENTS = HERE / "requirements.txt"
+VENV = HERE / ".venv"
+# Written only after a clean install, so an install that dies halfway is
+# retried on the next run instead of being remembered as done.
+STAMP = VENV / ".deps-stamp"
+
+
+def fail(message: str) -> None:
+    print(f"\nERROR: {message}\n", file=sys.stderr)
+    sys.exit(1)
+
+
+def venv_python() -> Path:
+    return VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def run_step(command: list[str], description: str) -> None:
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        fail(f"{description} failed (exit code {result.returncode}). "
+             "The app was not started.")
+
+
+def ensure_environment() -> Path:
+    python = venv_python()
+    if not python.exists():
+        print(f"Creating a private Python environment in {VENV.name}/ ...")
+        run_step([sys.executable, "-m", "venv", str(VENV)],
+                 "Creating the virtual environment")
+        if not python.exists():
+            fail(f"the environment was created but {python} is missing.")
+
+    wanted = hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()
+    installed = STAMP.read_text().strip() if STAMP.exists() else ""
+    if wanted != installed:
+        print("Installing dependencies -- first run only, usually under a minute ...")
+        run_step([str(python), "-m", "pip", "install", "--quiet",
+                  "--disable-pip-version-check", "--upgrade", "pip"],
+                 "Upgrading pip")
+        run_step([str(python), "-m", "pip", "install", "--quiet",
+                  "--disable-pip-version-check", "-r", str(REQUIREMENTS)],
+                 "Installing dependencies")
+        STAMP.write_text(wanted)
+    return python
+
+
+def first_free_port(preferred: int) -> int:
+    """connect_ex() == 0 means something already answers there, so keep looking.
+
+    Probing rather than hardcoding matters when sharing: a colleague may well
+    have something else on 8765, and a port clash makes Streamlit exit with a
+    message most people would read as "the app is broken".
+    """
+    for port in range(preferred, preferred + 20):
+        with socket.socket() as probe:
+            if probe.connect_ex(("127.0.0.1", port)) != 0:
+                return port
+    fail(f"no free port between {preferred} and {preferred + 19}.")
+
+
+def wait_until_serving(process: subprocess.Popen, port: int) -> None:
+    deadline = time.monotonic() + STARTUP_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            fail(f"Streamlit exited during startup (code {process.returncode}). "
+                 "The output above says why.")
+        with socket.socket() as probe:
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                return
+        time.sleep(0.3)
+    process.terminate()
+    fail(f"Streamlit did not start within {STARTUP_TIMEOUT_S}s.")
+
+
+def main() -> None:
+    if sys.version_info < MIN_PYTHON:
+        fail(f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required, but this is "
+             f"{sys.version.split()[0]}. Install a newer Python from "
+             "https://www.python.org/downloads/")
+    for required in (APP, REQUIREMENTS):
+        if not required.exists():
+            fail(f"{required.name} is missing from {HERE}. Keep every file from "
+                 "the shared folder together.")
+
+    python = ensure_environment()
+    port = first_free_port(PREFERRED_PORT)
+    url = f"http://localhost:{port}"
+
+    process = subprocess.Popen([
+        str(python), "-m", "streamlit", "run", str(APP),
+        "--server.port", str(port),
+        "--server.headless", "true",
+        "--browser.gatherUsageStats", "false",
+    ])
+    try:
+        wait_until_serving(process, port)
+        print(f"\n  Position Size Calculator is running at {url}")
+        print("  Your positions are saved in this folder, in positions.json.")
+        print("  Leave this window open while you use the app; close it to stop.\n")
+        webbrowser.open(url)
+        process.wait()
+    except KeyboardInterrupt:
+        print("\nStopping ...")
+        process.terminate()
+        process.wait()
+
+
+if __name__ == "__main__":
+    main()

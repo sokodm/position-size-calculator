@@ -1,0 +1,14 @@
+# Your live portfolio: sizes, entry prices, risk settings. Never commit this --
+# it is personal financial data, and each person needs their own copy anyway.
+positions.json
+
+# Streamlit's run log. Contains your portfolio size in plain text.
+streamlit.log
+
+# ~700 MB, and built for one specific OS -- it will not work on another.
+.venv/
+
+__pycache__/
+*.py[cod]
+
+.DS_Store
