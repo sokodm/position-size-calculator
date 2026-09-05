@@ -1,2 +1,11 @@
 [theme]
 primaryColor = "#5DADE2"
+
+[client]
+# Streamlit's default is "auto", which shows developer controls whenever the
+# app is served from localhost -- and this app is ALWAYS served from localhost,
+# so every user gets them. That means a "Rerun / Always rerun" bar whenever
+# app.py changes on disk, plus Clear cache and Deploy in the menu. None of it
+# means anything to someone using this as a calculator. "viewer" drops exactly
+# those and keeps the print and theme options.
+toolbarMode = "viewer"
