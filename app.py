@@ -28,15 +28,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
-# The tradingview MCP server (uvx tradingview-mcp-server) is configured with
-# this corporate CA bundle so its outbound HTTPS calls pass the Zscaler proxy.
-# We need the same env vars before importing tradingview_ta's requests client,
-# or every scanner call fails with SSLCertVerificationError.
-_CERT_BUNDLE = Path.home() / ".claude" / "certs" / "corporate-ca-bundle.pem"
-if _CERT_BUNDLE.exists():
-    os.environ.setdefault("SSL_CERT_FILE", str(_CERT_BUNDLE))
-    os.environ.setdefault("REQUESTS_CA_BUNDLE", str(_CERT_BUNDLE))
-
 # TradingView's CloudFront CDN returns HTTP 429 (empty body) specifically for the
 # "tradingview_ta/{version}" User-Agent that tradingview_ta hardcodes into every TA
 # request (confirmed via side-by-side testing: identical payload with a generic UA
