@@ -57,7 +57,7 @@ def ensure_environment() -> Path:
             fail(f"the environment was created but {python} is missing.")
 
     wanted = hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()
-    installed = STAMP.read_text().strip() if STAMP.exists() else ""
+    installed = STAMP.read_text(encoding="utf-8").strip() if STAMP.exists() else ""
     if wanted != installed:
         print("Installing dependencies -- first run only, usually under a minute ...")
         run_step([str(python), "-m", "pip", "install", "--quiet",
@@ -66,7 +66,7 @@ def ensure_environment() -> Path:
         run_step([str(python), "-m", "pip", "install", "--quiet",
                   "--disable-pip-version-check", "-r", str(REQUIREMENTS)],
                  "Installing dependencies")
-        STAMP.write_text(wanted)
+        STAMP.write_text(wanted, encoding="utf-8")
     return python
 
 

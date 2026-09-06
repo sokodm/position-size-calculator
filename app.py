@@ -393,7 +393,7 @@ def _validated_state(saved) -> tuple[dict, list[str]]:
 def load_state() -> dict:
     if DATA_FILE.exists():
         try:
-            saved = json.loads(DATA_FILE.read_text())
+            saved = json.loads(DATA_FILE.read_text(encoding="utf-8"))
             state, notes = _validated_state(saved)
             if notes:
                 # Copy the file aside BEFORE returning: these notes mean values
@@ -476,7 +476,7 @@ def _disk_revision() -> int:
     if not DATA_FILE.exists():
         return 0
     try:
-        return int(json.loads(DATA_FILE.read_text()).get("revision", 0))
+        return int(json.loads(DATA_FILE.read_text(encoding="utf-8")).get("revision", 0))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return -1
 
@@ -492,8 +492,14 @@ def _atomic_write(state: dict) -> None:
         # destination inherits *its* mode (0600 from mkstemp) -- without this
         # the file's permissions came from the umask instead, quietly widening
         # a deliberately chmod-ed positions.json back to world-readable.
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as fh:
+        # fchmod is Unix-only (the os docs say "Availability: Unix") and this
+        # app supports Python 3.10+, so on Windows the attribute is absent and
+        # calling it raises AttributeError -- which save_state() does not catch,
+        # crashing the page on a user's very first save. There is no POSIX mode
+        # to widen there anyway: the file inherits its parent directory's ACL.
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             # allow_nan=False: Python emits bare NaN/Infinity, which no other
             # JSON reader accepts. Better to refuse the write (the good file
             # survives) than to persist something only Python can parse.
@@ -1723,10 +1729,10 @@ st.markdown(
     [data-testid="stSidebar"] {
         --pf-control-w: 155px;
     }
-    /* Explicit sidebar grey: Streamlit's default #f0f2f6 (1.121:1 against the
-       white main area) did not read as grey enough for this app's owner, who
-       asked for it repeatedly. #e5e9f0 is 1.218:1 -- #dee2eb was tried first
-       and rejected as too dark. Deliberately NOT applied to
+    /* Explicit sidebar grey: Streamlit's default #f0f2f6 barely separates from
+       the white main area (1.121:1), so the sidebar does not read as a distinct
+       panel. #e5e9f0 is 1.218:1 -- #dee2eb was tried first and rejected as too
+       dark. Deliberately NOT applied to
        [data-testid="stApp"], which is the single element the whole page's white
        comes from (the view container, main block and header are all
        transparent) -- painting that grey would dissolve the main-area fields,
