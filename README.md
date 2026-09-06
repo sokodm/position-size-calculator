@@ -31,78 +31,46 @@ right show the inputs and the ATR they were derived from.](docs/screenshot.png)
 
 ## Install it
 
-No command line, no Git account, nothing to sign up for. Three steps.
+Needs **Python 3.10 or newer** — everything else installs itself on first start.
 
-### 1. Download the ZIP
+**1. Download** — on the
+[project page](https://github.com/sokodm/position-size-calculator), click the
+green **Code** button → **Download ZIP**.
 
-Open <https://github.com/sokodm/position-size-calculator>, click the green
-**Code** button near the top right, then click **Download ZIP**. A file called
-`position-size-calculator-main.zip` lands in your **Downloads** folder.
+**2. Unzip**
 
-### 2. Unzip it
+- **Mac** — double-click the ZIP file.
+- **Windows** — right-click the ZIP file → **Extract All…** → **Extract**.
+  Do not skip this: double-clicking a ZIP on Windows only previews it, and the
+  app cannot run from a preview.
 
-A ZIP is a whole folder squashed into a single file. Unzipping unpacks it again —
-your computer already knows how, there is nothing extra to install.
-
-- **Mac** — double-click the `.zip` file. A folder named
-  `position-size-calculator-main` appears right next to it. Done.
-- **Windows** — **right-click** the `.zip` file → **Extract All…** → **Extract**.
-  A folder named `position-size-calculator-main` appears.
-
-> **Windows: do not skip the extracting.** Double-clicking a ZIP on Windows only
-> shows you what is inside — it looks like a folder, but it is a preview, and the
-> app cannot run from it. You need the real folder that **Extract All** creates.
-
-Move that folder anywhere you like — Documents, Desktop, wherever. You can rename
-it. The only rule is that the files inside stay together.
-
-### 3. Double-click the start file
-
-Open the folder and double-click:
+**3. Start it** — open the unzipped folder and double-click:
 
 - **Mac** — `Start Calculator (Mac).command`
 - **Windows** — `Start Calculator (Windows).bat`
 
-A plain black text window opens. The first time, it spends a few minutes
-installing what the app needs — that is normal, and it only happens once. Then
-your browser opens with the calculator in it.
-
-**Leave the black window open while you use the app** — closing it stops the app.
-To use the calculator again another day, double-click the same file; after the
-first time it starts in seconds.
+The first start takes a few minutes while it installs what it needs; after that
+it opens in seconds. Your browser opens automatically. **Leave the terminal
+window open while you use the app** — closing it stops the app.
 
 ### If it does not start
 
-**It says Python is not installed.** Python is the free programming language this
-calculator is written in, and most Macs and PCs do not come with it.
+| Message | Fix |
+|---|---|
+| Python is not installed | Install it from [python.org](https://www.python.org/downloads/). **On Windows, tick "Add python.exe to PATH"** on the installer's first screen. Then double-click the start file again. |
+| Mac: "unidentified developer" | Right-click `Start Calculator (Mac).command` → **Open** → **Open**. Once only. |
+| Windows: "Windows protected your PC" | Click **More info** → **Run anyway**. Once only. |
+| Window opens and closes instantly | The app is being run from inside the ZIP preview. Extract the folder properly (step 2). |
 
-1. Go to <https://www.python.org/downloads/> and click the big **Download
-   Python** button.
-2. Open the file it downloads and click through the installer.
-3. **Windows only, and this step matters:** on the installer's *first* screen,
-   tick **Add python.exe to PATH** before clicking Install. Skip it and Windows
-   will not be able to find Python afterwards.
-4. Double-click the start file again.
+### Advanced: install with Git
 
-**Mac says the file "cannot be opened because it is from an unidentified
-developer".** macOS blocks anything downloaded from the internet until you vouch
-for it once. **Right-click** `Start Calculator (Mac).command` → **Open** →
-**Open** in the box that appears. You only ever do this once.
+```sh
+git clone https://github.com/sokodm/position-size-calculator.git
+cd position-size-calculator
+python3 run.py        # Windows: py -3 run.py
+```
 
-**Windows shows a blue "Windows protected your PC" box.** Click **More info**,
-then **Run anyway**. Same idea — Windows is cautious about files from the
-internet.
-
-**The window flashes open and shuts immediately.** Both start files are written
-to stay open and print the reason they stopped, so this almost always means the
-app is being run from inside the ZIP preview rather than a properly extracted
-folder. Go back to step 2.
-
-*Comfortable with a terminal?* `git clone
-https://github.com/sokodm/position-size-calculator.git` and then `python3 run.py`
-(Mac) or `py -3 run.py` (Windows) does exactly the same thing. Python 3.10 or
-newer is the only requirement either way; everything else installs itself into a
-`.venv` folder beside the app.
+Identical result — the launchers just call `run.py` for you.
 
 ## What it works out
 
