@@ -113,7 +113,9 @@ down. It is free and takes about two minutes.
 
 ### Advanced: install with Git
 
-Unlike the double-click route, **this one needs Python 3.10+ already installed** —
+Unlike the double-click route, **this one needs Python 3.10–3.13 already
+installed** (3.14 is not supported yet — one of the pinned dependencies caps
+there, and the start files download a private 3.12 rather than use it) —
 `run.py` is itself a Python program, so it cannot fetch the thing that runs it.
 That bootstrap lives in the two start files.
 

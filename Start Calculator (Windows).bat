@@ -38,7 +38,13 @@ set "RUNTIME_PY=%RUNTIME_DIR%\python\python.exe"
 set "STAGING=%RUNTIME_DIR%\.download"
 set "PY_ARCHIVE=cpython-%PY_VERSION%+%PY_BUILD%-%PY_TRIPLE%-install_only.tar.gz"
 set "PY_URL=https://github.com/astral-sh/python-build-standalone/releases/download/%PY_BUILD%/%PY_ARCHIVE%"
-set "VERCHECK=import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
+REM The 3.14 ceiling is not arbitrary and must not be raised on its own:
+REM tradingview-mcp-server==0.8.1 declares Requires-Python >=3.10,<3.14, so on a
+REM newer Python this check would pass, a venv would be built, and pip would
+REM only then refuse to install -- long after the interpreter was chosen.
+REM Failing the probe instead sends a too-new PC down the download path to the
+REM private 3.12, which is exactly what that path exists for.
+set "VERCHECK=import sys; sys.exit(0 if (3, 10) <= sys.version_info < (3, 14) else 1)"
 REM Defaults to failure, so a path that somehow reaches :done without setting
 REM it reports a problem rather than a silent success.
 set "RUN_STATUS=1"

@@ -22,6 +22,13 @@ from datetime import datetime
 from pathlib import Path
 
 MIN_PYTHON = (3, 10)
+# Exclusive ceiling, and it belongs to requirements.txt rather than to this
+# file: tradingview-mcp-server==0.8.1 declares Requires-Python >=3.10,<3.14.
+# Without the ceiling a 3.14 interpreter passes the check, gets a venv built
+# around it, and only then does pip refuse -- so the failure surfaces as an
+# unreadable resolver error instead of "that Python is too new". Raise this
+# only together with the pin that sets it, and with the two launchers.
+MAX_PYTHON = (3, 14)
 PREFERRED_PORT = 8765
 STARTUP_TIMEOUT_S = 120
 
@@ -135,10 +142,20 @@ def wait_until_serving(process: subprocess.Popen, port: int) -> None:
 
 
 def main() -> None:
+    supported = f"{MIN_PYTHON[0]}.{MIN_PYTHON[1]} to {MAX_PYTHON[0]}.{MAX_PYTHON[1] - 1}"
     if sys.version_info < MIN_PYTHON:
-        fail(f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required, but this is "
+        fail(f"Python {supported} is required, but this is "
              f"{sys.version.split()[0]}. Install a newer Python from "
              "https://www.python.org/downloads/")
+    if sys.version_info >= MAX_PYTHON:
+        # Separated from the too-old case because the remedy is the opposite:
+        # there is nothing to install, and the start file already ships a
+        # working interpreter for exactly this situation.
+        fail(f"Python {supported} is required, but this is "
+             f"{sys.version.split()[0]}, which the app's pinned dependencies "
+             "do not support yet. Start the app with the start file for your "
+             "system instead of running run.py directly -- it will fetch a "
+             "private copy of a supported Python.")
     for required in (APP, REQUIREMENTS):
         if not required.exists():
             fail(f"{required.name} is missing from {HERE}. Keep every file from "

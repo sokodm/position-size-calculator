@@ -35,8 +35,15 @@ pause_then_exit() {
 
 # 3.10 is run.py's floor. Checking the version rather than mere existence
 # matters on older Macs, which still ship a python3 that is too old.
+#
+# The 3.14 ceiling is not arbitrary and must not be raised on its own:
+# tradingview-mcp-server==0.8.1 declares Requires-Python >=3.10,<3.14, so on a
+# newer Python this check would pass, a venv would be built, and pip would only
+# then refuse to install -- long after the interpreter was chosen. Failing the
+# probe instead sends a too-new Mac down the download path to the private 3.12,
+# which is exactly what that path exists for.
 usable() {
-    "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' \
+    "$1" -c 'import sys; sys.exit(0 if (3, 10) <= sys.version_info < (3, 14) else 1)' \
         >/dev/null 2>&1
 }
 
