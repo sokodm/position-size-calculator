@@ -26,7 +26,11 @@ _CUTOFF_FUNC = "run_pending_symbol_check"
 
 
 def _parsed():
-    source = APP.read_text()
+    # Explicit encoding, not the locale default: app.py holds non-ASCII (the
+    # multiplication sign and em dashes in its comments and UI strings), and on
+    # Windows read_text() defaults to cp1252, which cannot decode them. Without
+    # this the harness dies before a single test runs.
+    source = APP.read_text(encoding="utf-8")
     return source, ast.parse(source)
 
 

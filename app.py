@@ -393,7 +393,7 @@ def _validated_state(saved) -> tuple[dict, list[str]]:
 def load_state() -> dict:
     if DATA_FILE.exists():
         try:
-            saved = json.loads(DATA_FILE.read_text())
+            saved = json.loads(DATA_FILE.read_text(encoding="utf-8"))
             state, notes = _validated_state(saved)
             if notes:
                 # Copy the file aside BEFORE returning: these notes mean values
@@ -476,7 +476,7 @@ def _disk_revision() -> int:
     if not DATA_FILE.exists():
         return 0
     try:
-        return int(json.loads(DATA_FILE.read_text()).get("revision", 0))
+        return int(json.loads(DATA_FILE.read_text(encoding="utf-8")).get("revision", 0))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return -1
 
@@ -499,7 +499,7 @@ def _atomic_write(state: dict) -> None:
         # to widen there anyway: the file inherits its parent directory's ACL.
         if hasattr(os, "fchmod"):
             os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             # allow_nan=False: Python emits bare NaN/Infinity, which no other
             # JSON reader accepts. Better to refuse the write (the good file
             # survives) than to persist something only Python can parse.
