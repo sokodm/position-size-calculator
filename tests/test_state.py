@@ -13,6 +13,8 @@ Covers the two things most likely to break quietly:
    rather than returning a plausible-looking size.
 """
 import math
+import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -33,7 +35,7 @@ def main() -> int:
                     "positions": [], "revision": 1}
             base.update(payload)
             import json
-            data_file.write_text(json.dumps(base))
+            data_file.write_text(json.dumps(base), encoding="utf-8")
 
         def clear():
             for stale in data_file.parent.glob("positions.json*"):
@@ -108,6 +110,29 @@ def main() -> int:
                       tranches=1, portfolio_size=500_000.0, risk_pct=1.0)
         check("row still returned (diagnostics stay on screen)", out is not None)
         check.equals("stop_reachable is False", out["stop_reachable"], False)
+
+        print("\n9. The real save path round-trips")
+        # Sections 2-4 seed state by writing JSON straight to disk, which skips
+        # _atomic_write entirely -- and that is the only OS-divergent code in
+        # the persistence layer (os.fchmod does not exist on Windows before
+        # 3.13). Without this section the suite goes green on Windows while the
+        # save path is dead, which is exactly how that bug shipped.
+        clear()
+        saved = {"portfolio_size": 250000.0, "risk_pct": 2.0,
+                 "timeframe_label": "Daily", "positions": [], "revision": 11}
+        ns["_atomic_write"](saved)
+        check("file was created", data_file.exists())
+        state = ns["load_state"]()
+        check.equals("portfolio survives the round-trip", state["portfolio_size"], 250000.0)
+        check.equals("risk survives", state["risk_pct"], 2.0)
+        check.equals("no load_error", state.get("load_error"), None)
+        check.equals("revision survives", ns["_disk_revision"](), 11)
+        check.equals("no temp files left behind",
+                     [p.name for p in data_file.parent.glob("*.tmp")], [])
+        if hasattr(os, "fchmod"):
+            mode = stat.S_IMODE(data_file.stat().st_mode)
+            check.equals("owner-only on Unix", oct(mode), oct(0o600))
+        clear()
 
     return check.report()
 
