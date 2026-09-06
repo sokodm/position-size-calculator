@@ -194,7 +194,19 @@ jobs:
           if (-not (Test-Path logs/launcher-steps.log)) {
             throw "the launcher wrote no step log"
           }
-          Get-Content -Raw logs/launcher-steps.log
+          $steps = Get-Content -Raw logs/launcher-steps.log
+          $steps
+          # Asserting the file exists is what let a broken log ship once: most
+          # messages read "<step> -> exit <code>", and cmd parsed that ">" as a
+          # real redirect, so they went to a file named "exit" and the log kept
+          # only the handful without one. Assert on a message that carries a
+          # ">", and on the absence of the file a mis-parse would leave behind.
+          if ($steps -notmatch 'run\.py -> exit') {
+            throw "messages containing '->' never reached the log"
+          }
+          if (Test-Path exit) {
+            throw "a stray 'exit' file was created -- '>' is being parsed as redirection"
+          }
 
       - name: The report exists and records a successful start
         shell: pwsh

@@ -16,9 +16,9 @@ REM A read-only folder must not make every later line fail loudly -- fall back
 REM to somewhere always writable rather than throwing the evidence away.
 if not exist "%LOG_DIR%" set "LOG=%TEMP%\psc-launcher-steps.log"
 >"%LOG%" echo === Position Size Calculator launcher === %DATE% %TIME%
->>"%LOG%" echo script folder : %~dp0
->>"%LOG%" echo working dir   : %CD%
->>"%LOG%" echo command shell : %ComSpec%
+call :log "script folder : %~dp0"
+call :log "working dir   : %CD%"
+call :log "command shell : %ComSpec%"
 
 REM Two different failures, told apart by testing the same file twice: absent
 REM under its full path means the ZIP was never properly extracted; present
@@ -140,8 +140,11 @@ goto run
 
 :run
 REM Echoed directly rather than through :log -- PY_CMD is itself quoted when it
-REM holds a path, and nested quotes truncate a "call" argument.
->>"%LOG%" echo [%TIME%] starting run.py with %PY_CMD%
+REM holds a path, and nested quotes truncate a "call" argument. Delayed
+REM expansion for the same reason :log uses it, below.
+setlocal enabledelayedexpansion
+>>"%LOG%" echo [%TIME%] starting run.py with !PY_CMD!
+endlocal
 %PY_CMD% run.py
 set "RUN_STATUS=%errorlevel%"
 call :log "run.py -> exit %RUN_STATUS%"
@@ -207,6 +210,17 @@ pause
 exit /b %RUN_STATUS%
 
 REM Placed past the exit above so normal flow can never fall into it.
+REM
+REM The message is captured into a variable and echoed with delayed expansion,
+REM never as %~1 directly. Percent expansion runs BEFORE cmd scans the line for
+REM redirection, so a ">" arriving that way is parsed as a real redirect: most
+REM messages here read "<step> -> exit <code>", and every one of them was
+REM silently written to a file named "exit" instead of to the log. "!MSG!" is
+REM expanded after that scan, so its ">" stays text. Capturing MSG before
+REM "setlocal" matters too -- afterwards a "!" in a folder name would be eaten.
 :log
->>"%LOG%" echo [%TIME%] %~1
+set "MSG=%~1"
+setlocal enabledelayedexpansion
+>>"%LOG%" echo [%TIME%] !MSG!
+endlocal
 goto :eof
