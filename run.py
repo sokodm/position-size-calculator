@@ -11,11 +11,14 @@ subprocess call passes an argument list rather than a shell string.
 """
 import hashlib
 import os
+import platform
 import socket
 import subprocess
 import sys
 import time
+import traceback
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 MIN_PYTHON = (3, 10)
@@ -30,8 +33,40 @@ VENV = HERE / ".venv"
 # retried on the next run instead of being remembered as done.
 STAMP = VENV / ".deps-stamp"
 
+LOG_DIR = HERE / "logs"
+ERROR_LOG = LOG_DIR / "run-py-last-error.log"
+# Set by the diagnostics: stop once the app has proved it serves, rather than
+# blocking on it the way a normal start does.
+DIAGNOSE = os.environ.get("PSC_DIAGNOSE") == "1"
 
-def fail(message: str) -> None:
+
+def record_failure(summary: str, detail: str = "") -> None:
+    """Persist a failure where it can still be read after the window closes.
+
+    On Windows this file is often the only surviving evidence: the console
+    disappears with the process, so anything printed to it is lost.
+    """
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        parts = [
+            f"time         : {datetime.now().isoformat(timespec='seconds')}",
+            f"interpreter  : {sys.executable}",
+            f"version      : {sys.version.split()[0]}",
+            f"platform     : {platform.platform()}",
+            f"folder       : {HERE}",
+            f"venv present : {venv_python().exists()}",
+            "",
+            summary,
+        ]
+        if detail:
+            parts += ["", detail]
+        ERROR_LOG.write_text("\n".join(parts) + "\n", encoding="utf-8")
+    except OSError as exc:
+        print(f"(could not write {ERROR_LOG}: {exc})", file=sys.stderr)
+
+
+def fail(message: str, detail: str = "") -> None:
+    record_failure(f"ERROR: {message}", detail)
     print(f"\nERROR: {message}\n", file=sys.stderr)
     sys.exit(1)
 
@@ -44,7 +79,8 @@ def run_step(command: list[str], description: str) -> None:
     result = subprocess.run(command)
     if result.returncode != 0:
         fail(f"{description} failed (exit code {result.returncode}). "
-             "The app was not started.")
+             "The app was not started.",
+             "command: " + " ".join(command))
 
 
 def ensure_environment() -> Path:
@@ -121,6 +157,11 @@ def main() -> None:
     try:
         wait_until_serving(process, port)
         print(f"\n  Position Size Calculator is running at {url}")
+        if DIAGNOSE:
+            print("  Diagnostics: startup succeeded, stopping the app again.\n")
+            process.terminate()
+            process.wait()
+            return
         print("  Your positions are saved in this folder, in positions.json.")
         print("  Leave this window open while you use the app; close it to stop.\n")
         webbrowser.open(url)
@@ -132,4 +173,15 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException:
+        # Without this the traceback goes only to a console that is about to
+        # disappear, which is exactly the failure being debugged.
+        detail = traceback.format_exc()
+        record_failure("Unhandled exception -- the app did not start.", detail)
+        print(detail, file=sys.stderr)
+        print(f"\nERROR: the app crashed. Details: {ERROR_LOG}\n", file=sys.stderr)
+        sys.exit(1)

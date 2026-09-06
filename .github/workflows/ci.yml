@@ -153,6 +153,54 @@ jobs:
           grep -q ".runtime" out2.txt
           test ! -e .runtime/.download
 
+  diagnostics:
+    # The reported failure -- a console window that closes on its own -- has
+    # never reproduced here, so this job cannot test the bug. What it can test
+    # is the instrumentation that has to survive it: the diagnostics run
+    # end-to-end against the REAL run.py rather than the stub above, which is
+    # the only job that proves the app genuinely starts on Windows.
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the diagnostics exactly as a double-click would
+        shell: cmd
+        run: |
+          call "Diagnose (Windows).bat" < nul > diag.txt 2>&1
+          type diag.txt
+
+      - name: Every step was logged
+        shell: pwsh
+        run: |
+          if (-not (Test-Path logs/launcher-steps.log)) {
+            throw "the launcher wrote no step log"
+          }
+          Get-Content -Raw logs/launcher-steps.log
+
+      - name: The report exists and records a successful start
+        shell: pwsh
+        run: |
+          $report = Get-ChildItem logs/diagnostics-*.html -ErrorAction SilentlyContinue |
+                      Select-Object -Last 1
+          if (-not $report) { throw "no HTML report was produced" }
+          "report: $($report.Name), $($report.Length) bytes"
+          $html = Get-Content -Raw $report.FullName
+          # A report that renders but reports nothing is the failure mode worth
+          # guarding: assert on the verdict, not on the file existing.
+          if ($html -notmatch 'The app started successfully') {
+            $html
+            throw "the diagnostics did not reach a successful start"
+          }
+
+      - name: Keep the report even when the job fails
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-diagnostics
+          path: logs/
+
 # tests/test_lookup.py is deliberately absent from this workflow. It calls
 # TradingView, so a red build would as often mean "the API was slow" as "the
 # code broke" -- and a suite that cries wolf gets ignored. Run it locally when
