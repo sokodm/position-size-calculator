@@ -2115,6 +2115,120 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Streamlit's own disconnect dialog says "Is Streamlit still running? ... just
+# restart it in your terminal: streamlit run yourscript.py" -- a command these
+# users never type, naming a file that does not exist here. It appears exactly
+# when the Python process is gone, so nothing server-side can reach it: this
+# runs while the app is alive and keeps working in the dead page afterwards,
+# which is also why it must be a components.html iframe (st.markdown never
+# executes <script>). Keyed on the <h2> text rather than a "done" marker, so a
+# React re-render that restores Streamlit's own wording is simply rewritten
+# again -- and so an unrelated st.dialog is never touched.
+components.html(
+    """
+    <script>
+    try {
+        const W = window.parent;
+        const D = W.document;
+
+        // height=0 leaves a wrapper that still claims a slot in the page's flex
+        // column, costing a measured 16px gap under the title. Streamlit 1.62
+        // does not put that height in an HTML attribute, so a CSS rule keyed on
+        // iframe[height="0"] matches nothing; the iframe finds its own wrapper
+        // instead, which cannot go stale. Hiding it does not stop this script --
+        // it has already run, and observers fire regardless of display.
+        for (const f of D.querySelectorAll("iframe")) {
+            if (f.contentWindow !== window) continue;
+            const slot = f.closest('[data-testid="stElementContainer"]');
+            if (slot) slot.style.display = "none";
+            break;
+        }
+
+        // Only the file the reader can actually double-click. Naming both on a
+        // machine we can identify would make them hunt for a file that is not
+        // there; an unrecognised platform falls back to showing both.
+        const ua = W.navigator.userAgent || "";
+        const FILES = /Windows|Win32|Win64/i.test(ua)
+            ? ["Start Calculator (Windows).bat"]
+            : /Mac/i.test(ua)
+                ? ["Start Calculator (Mac).command"]
+                : ["Start Calculator (Windows).bat", "Start Calculator (Mac).command"];
+
+        const rewrite = function (dialog) {
+            const h2 = dialog.querySelector('h2[slot="title"]');
+            if (!h2 || h2.textContent.trim() !== "Connection error") return;
+            // Streamlit puts the message and the code block in the element
+            // straight after the title. If that ever stops being true we leave
+            // the dialog exactly as Streamlit built it rather than half-edit it.
+            const body = h2.nextElementSibling;
+            if (!body) return;
+
+            h2.textContent = "The calculator has stopped";
+            body.textContent = "";
+            const say = function (text, muted) {
+                const p = D.createElement("p");
+                p.textContent = text;
+                p.style.margin = "0 0 0.75rem";
+                if (muted) { p.style.fontSize = "0.85em"; p.style.opacity = "0.75"; }
+                body.appendChild(p);
+            };
+            say("It is not running any more \\u2014 usually because the window "
+                + "that started it was closed.");
+            say(FILES.length > 1
+                ? "To start it again, open the app's folder and double-click the "
+                  + "start file for your computer:"
+                : "To start it again, open the app's folder and double-click:");
+            for (const name of FILES) {
+                const box = D.createElement("div");
+                box.textContent = name;
+                box.style.cssText = "background:#f0f2f6;border-radius:8px;"
+                    + "padding:0.6rem 0.8rem;margin:0 0 0.75rem;font-weight:600;"
+                    + "word-break:break-word;";
+                body.appendChild(box);
+            }
+            say("Then click Reload below.");
+            // The first thing anyone fears here is having lost their positions.
+            say("Your saved positions are safe \\u2014 they are stored in "
+                + "positions.json in that same folder.", true);
+
+            const btn = D.createElement("button");
+            btn.textContent = "Reload";
+            btn.style.cssText = "background:#ff4b4b;color:#fff;border:0;"
+                + "border-radius:8px;padding:0.5rem 1rem;font-size:1rem;"
+                + "font-weight:600;cursor:pointer;";
+            btn.addEventListener("click", function () { W.location.reload(); });
+            body.appendChild(btn);
+        };
+
+        if (W.__pscStoppedObserver) W.__pscStoppedObserver.disconnect();
+        let queued = false;
+        const sweep = function () {
+            queued = false;
+            for (const d of D.querySelectorAll('[data-testid="stDialog"]')) rewrite(d);
+        };
+        // Rewriting sets text the guard above no longer matches, so our own
+        // writes end the cycle instead of retriggering it. Debounced into the
+        // frame before paint, so the replacement is what first appears rather
+        // than a flash of Streamlit's wording.
+        W.__pscStoppedObserver = new W.MutationObserver(function () {
+            if (queued) return;
+            queued = true;
+            W.requestAnimationFrame(sweep);
+        });
+        W.__pscStoppedObserver.observe(D.body, {childList: true, subtree: true});
+        sweep();
+    } catch (e) {
+        // Nothing to sanity-check at install time -- the dialog this targets
+        // does not exist until the server dies -- so a failure to reach the
+        // parent document is the only signal available, and it must not be
+        // swallowed by an invisible iframe.
+        console.error("[stopped-app dialog] install failed", e);
+    }
+    </script>
+    """,
+    height=0,
+)
+
 # Must run before the first widget is created: adopting newer values means
 # assigning to widget-backed keys (timeframe_label is one), which Streamlit
 # rejects once that widget has been instantiated in the current run.
