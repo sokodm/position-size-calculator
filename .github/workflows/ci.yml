@@ -171,11 +171,11 @@ jobs:
     # end-to-end against the REAL run.py rather than the stub above, which is
     # the only job that proves the app genuinely starts on Windows.
     #
-    # Deliberately no setup-python here. The image's own 3.14 is too new, so
-    # the launcher rejects it and provisions the private 3.12 -- which makes
-    # this the one job that walks the whole path a Python-less PC walks:
-    # reject, download, verify, unpack, build the venv, serve. It is also what
-    # caught the missing version ceiling in the first place.
+    # Deliberately no setup-python here: the image is left exactly as it comes,
+    # which happens to be the interesting case. It offers "py -3" as 3.14 and
+    # "python" as 3.12, so the launcher has to reject the first and fall
+    # through to the second -- the discriminator this job exists to check, and
+    # the arrangement that exposed the missing version ceiling to begin with.
     runs-on: windows-latest
     timeout-minutes: 25
 
