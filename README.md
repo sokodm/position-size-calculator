@@ -57,10 +57,35 @@ window open while you use the app** — closing it stops the app.
 
 | Message | Fix |
 |---|---|
-| Python is not installed | Install it from [python.org](https://www.python.org/downloads/). **On Windows, tick "Add python.exe to PATH"** on the installer's first screen. Then double-click the start file again. |
+| Python is not installed | See [Installing Python](#installing-python) just below. |
 | Mac: "unidentified developer" | Right-click `Start Calculator (Mac).command` → **Open** → **Open**. Once only. |
 | Windows: "Windows protected your PC" | Click **More info** → **Run anyway**. Once only. |
 | Window opens and closes instantly | The app is being run from inside the ZIP preview. Extract the folder properly (step 2). |
+
+### Installing Python
+
+Only needed if the start file said Python is missing. It is free, takes about
+two minutes, and you only do it once.
+
+**Mac**
+
+1. Go to <https://www.python.org/downloads/> and click the yellow **Download
+   Python** button.
+2. Open the downloaded `.pkg` file from your Downloads folder.
+3. Click **Continue** through the installer, **Agree** to the licence, then
+   **Install**. Enter your Mac password when asked.
+4. Close the installer and double-click `Start Calculator (Mac).command` again.
+
+**Windows**
+
+1. Go to <https://www.python.org/downloads/> and click the yellow **Download
+   Python** button.
+2. Open the downloaded `.exe` file from your Downloads folder.
+3. **Before clicking anything else, tick the "Add python.exe to PATH" box at the
+   bottom of that first screen.** This is the step people miss, and without it
+   Windows cannot find Python afterwards.
+4. Click **Install Now** and wait for it to finish.
+5. Close the installer and double-click `Start Calculator (Windows).bat` again.
 
 ### Advanced: install with Git
 
