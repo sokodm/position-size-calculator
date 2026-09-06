@@ -37,9 +37,9 @@ Python itself if your computer does not already have it. Nothing is installed
 system-wide, nothing asks for your password, and nothing changes your computer's
 settings: it all stays inside the folder you unzipped.
 
-**1. Download** — on the
-[project page](https://github.com/sokodm/position-size-calculator), click the
-green **Code** button → **Download ZIP**.
+**1. Download** — go to the app's page on GitHub:
+<https://github.com/sokodm/position-size-calculator>. Click the green **Code**
+button near the top right, then **Download ZIP**.
 
 **2. Unzip**
 
