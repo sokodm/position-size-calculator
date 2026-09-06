@@ -68,8 +68,21 @@ take a little longer.
 |---|---|
 | Mac: "unidentified developer" | Right-click `Start Calculator (Mac).command` → **Open** → **Open**. Once only. |
 | Windows: "Windows protected your PC" | Click **More info** → **Run anyway**. Once only. |
-| Window opens and closes instantly | The app is being run from inside the ZIP preview. Extract the folder properly (step 2). |
+| Window opens and closes instantly | Usually the app is being run from inside the ZIP preview — extract the folder properly (step 2). If it is extracted and still closes, see **Windows: getting a diagnosis** below. |
 | Anything about Python failing to download | Check your internet connection and try again. If it keeps failing, install Python by hand — see [Installing Python](#installing-python). |
+
+### Windows: getting a diagnosis
+
+When the window closes too fast to read, double-click **`Diagnose (Windows).bat`**
+instead. It runs the start file as a *separate* process, so it survives even a
+start file that is killed outright, and writes a report to `logs/` that opens in
+your browser: what Python the PC has, whether the folder was extracted properly,
+whether the download can reach the internet, and the full text of any error.
+
+The start file also keeps a running log of its own steps in
+`logs\launcher-steps.log`, written as each step happens — so the last line tells
+you where it got to even when the window is gone. Neither file leaves your
+computer; both are ignored by Git.
 
 ### Installing Python
 
@@ -100,7 +113,9 @@ down. It is free and takes about two minutes.
 
 ### Advanced: install with Git
 
-Unlike the double-click route, **this one needs Python 3.10+ already installed** —
+Unlike the double-click route, **this one needs Python 3.10–3.13 already
+installed** (3.14 is not supported yet — one of the pinned dependencies caps
+there, and the start files download a private 3.12 rather than use it) —
 `run.py` is itself a Python program, so it cannot fetch the thing that runs it.
 That bootstrap lives in the two start files.
 

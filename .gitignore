@@ -12,6 +12,10 @@ streamlit.log
 # story: one specific OS and processor, so it never belongs in the repo.
 .runtime/
 
+# Launcher step logs, crash reports and the generated HTML diagnostics. They
+# name local paths and are specific to one machine's failure.
+logs/
+
 __pycache__/
 *.py[cod]
 

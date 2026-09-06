@@ -55,6 +55,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Give the machine a Python the launchers actually accept
+        # The runner images ship Python 3.14, which the launchers deliberately
+        # refuse -- tradingview-mcp-server caps at <3.14. Without this the
+        # "machine already has Python" steps below would silently become
+        # download-path tests and their "no .runtime" assertion would fail.
+        # Pinning 3.12 also makes those steps prove something extra: that a
+        # too-new "py -3" is skipped in favour of a supported "python".
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Stand in for run.py
         # A launcher's whole contract is "hand a working Python 3.10+ to
         # run.py". The real run.py starts a server and never returns, so it is
@@ -152,6 +163,72 @@ jobs:
           grep -q "RUNPY_VERSION=3.12.14" out2.txt
           grep -q ".runtime" out2.txt
           test ! -e .runtime/.download
+
+  diagnostics:
+    # The reported failure -- a console window that closes on its own -- has
+    # never reproduced here, so this job cannot test the bug. What it can test
+    # is the instrumentation that has to survive it: the diagnostics run
+    # end-to-end against the REAL run.py rather than the stub above, which is
+    # the only job that proves the app genuinely starts on Windows.
+    #
+    # Deliberately no setup-python here: the image is left exactly as it comes,
+    # which happens to be the interesting case. It offers "py -3" as 3.14 and
+    # "python" as 3.12, so the launcher has to reject the first and fall
+    # through to the second -- the discriminator this job exists to check, and
+    # the arrangement that exposed the missing version ceiling to begin with.
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the diagnostics exactly as a double-click would
+        shell: cmd
+        run: |
+          call "Diagnose (Windows).bat" < nul > diag.txt 2>&1
+          type diag.txt
+
+      - name: Every step was logged
+        shell: pwsh
+        run: |
+          if (-not (Test-Path logs/launcher-steps.log)) {
+            throw "the launcher wrote no step log"
+          }
+          $steps = Get-Content -Raw logs/launcher-steps.log
+          $steps
+          # Asserting the file exists is what let a broken log ship once: most
+          # messages read "<step> -> exit <code>", and cmd parsed that ">" as a
+          # real redirect, so they went to a file named "exit" and the log kept
+          # only the handful without one. Assert on a message that carries a
+          # ">", and on the absence of the file a mis-parse would leave behind.
+          if ($steps -notmatch 'run\.py -> exit') {
+            throw "messages containing '->' never reached the log"
+          }
+          if (Test-Path exit) {
+            throw "a stray 'exit' file was created -- '>' is being parsed as redirection"
+          }
+
+      - name: The report exists and records a successful start
+        shell: pwsh
+        run: |
+          $report = Get-ChildItem logs/diagnostics-*.html -ErrorAction SilentlyContinue |
+                      Select-Object -Last 1
+          if (-not $report) { throw "no HTML report was produced" }
+          "report: $($report.Name), $($report.Length) bytes"
+          $html = Get-Content -Raw $report.FullName
+          # A report that renders but reports nothing is the failure mode worth
+          # guarding: assert on the verdict, not on the file existing.
+          if ($html -notmatch 'The app started successfully') {
+            $html
+            throw "the diagnostics did not reach a successful start"
+          }
+
+      - name: Keep the report even when the job fails
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-diagnostics
+          path: logs/
 
 # tests/test_lookup.py is deliberately absent from this workflow. It calls
 # TradingView, so a red build would as often mean "the API was slow" as "the
