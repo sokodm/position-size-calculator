@@ -31,7 +31,11 @@ right show the inputs and the ATR they were derived from.](docs/screenshot.png)
 
 ## Install it
 
-Needs **Python 3.10 or newer** — everything else installs itself on first start.
+**You do not need to install Python, or anything else, first.** Download,
+unzip, double-click — the start file sorts out everything it needs, including
+Python itself if your computer does not already have it. Nothing is installed
+system-wide, nothing asks for your password, and nothing changes your computer's
+settings: it all stays inside the folder you unzipped.
 
 **1. Download** — on the
 [project page](https://github.com/sokodm/position-size-calculator), click the
@@ -49,23 +53,30 @@ green **Code** button → **Download ZIP**.
 - **Mac** — `Start Calculator (Mac).command`
 - **Windows** — `Start Calculator (Windows).bat`
 
-The first start takes a few minutes while it installs what it needs; after that
-it opens in seconds. Your browser opens automatically. **Leave the terminal
-window open while you use the app** — closing it stops the app.
+The first start takes a few minutes while it downloads and installs what it
+needs; after that it opens in seconds. Your browser opens automatically. **Leave
+the terminal window open while you use the app** — closing it stops the app.
+
+If your computer has no Python, the start file says so and fetches its own
+private copy (24 MB on Mac, 45 MB on Windows) into the folder before carrying
+on. You do not have to do anything — it is just why the very first start can
+take a little longer.
 
 ### If it does not start
 
 | Message | Fix |
 |---|---|
-| Python is not installed | See [Installing Python](#installing-python) just below. |
 | Mac: "unidentified developer" | Right-click `Start Calculator (Mac).command` → **Open** → **Open**. Once only. |
 | Windows: "Windows protected your PC" | Click **More info** → **Run anyway**. Once only. |
 | Window opens and closes instantly | The app is being run from inside the ZIP preview. Extract the folder properly (step 2). |
+| Anything about Python failing to download | Check your internet connection and try again. If it keeps failing, install Python by hand — see [Installing Python](#installing-python). |
 
 ### Installing Python
 
-Only needed if the start file said Python is missing. It is free, takes about
-two minutes, and you only do it once.
+**Most people can skip this.** The start file installs Python for you. These
+steps are the fallback for when that download cannot work — no internet on the
+machine, a network that blocks the download, or a workplace computer locked
+down. It is free and takes about two minutes.
 
 **Mac**
 
@@ -89,13 +100,28 @@ two minutes, and you only do it once.
 
 ### Advanced: install with Git
 
+Unlike the double-click route, **this one needs Python 3.10+ already installed** —
+`run.py` is itself a Python program, so it cannot fetch the thing that runs it.
+That bootstrap lives in the two start files.
+
 ```sh
 git clone https://github.com/sokodm/position-size-calculator.git
 cd position-size-calculator
-python3 run.py        # Windows: py -3 run.py
 ```
 
-Identical result — the launchers just call `run.py` for you.
+Then, on **Mac**:
+
+```sh
+python3 run.py
+```
+
+or on **Windows**:
+
+```bat
+py -3 run.py
+```
+
+Identical result — the start files just find a Python and call `run.py` for you.
 
 ## What it works out
 
@@ -190,6 +216,16 @@ machine build its own on first launch.
 Most of that size is not this app: `pyarrow`, `pandas` and `numpy` alone are
 about 220 MB, and Streamlit requires all three. `pip install --dry-run -r
 requirements.txt` prints the full tree if you want to read it first.
+
+If your machine had no Python, there is also a `.runtime` folder holding the
+private copy the start file downloaded — a [python-build-standalone][pbs] build
+of CPython 3.12, checked against a SHA-256 hash pinned in the start file before
+it is unpacked. It is gitignored and specific to one OS and processor, same as
+`.venv`. Deleting either folder is safe; the next start rebuilds it.
+
+[pbs]: https://github.com/astral-sh/python-build-standalone
+
+To remove the app completely, delete the folder. Nothing lives outside it.
 
 ## Tests
 

@@ -42,6 +42,82 @@ jobs:
       - name: State, validation and sizing maths
         run: python tests/test_state.py
 
+  launcher:
+    # The job above cannot test the launchers: setup-python hands it the very
+    # thing the launchers exist to provide. This one runs each launcher for
+    # real, on both the machine-has-Python and the machine-has-none paths.
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-13 is Intel and macos-latest is Apple Silicon. Both are here
+        # because the Mac launcher pins a different tarball and SHA-256 per
+        # processor, and a wrong or withdrawn Intel asset would otherwise ship
+        # green -- surfacing only on an Intel Mac that has no other Python.
+        os: [macos-latest, macos-13, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stand in for run.py
+        # A launcher's whole contract is "hand a working Python 3.10+ to
+        # run.py". The real run.py starts a server and never returns, so it is
+        # replaced by a stub that reports the interpreter it was handed.
+        shell: bash
+        run: |
+          cat > run.py <<'PY'
+          import sys
+          print("RUNPY_INTERPRETER=" + sys.executable)
+          print("RUNPY_VERSION=%d.%d.%d" % sys.version_info[:3])
+          PY
+
+      - name: Windows -- uses the Python already on the machine
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "Start Calculator (Windows).bat" < nul > out.txt 2>&1
+          type out.txt
+          findstr /C:"RUNPY_VERSION=3." out.txt > nul || exit /b 1
+          if exist .runtime exit /b 1
+
+      - name: Windows -- downloads its own Python when the machine has none
+        # A runner always has Python, and it cannot be hidden with a PATH shim:
+        # cmd resolves "py" to a shim .bat and, invoked without CALL, a batch
+        # file transfers control instead of returning -- the launcher would die
+        # at the probe rather than fall through. So only the two "where" probes
+        # are rewritten to a name that cannot resolve; every line the test is
+        # actually about -- download, checksum, unpack, exec -- runs verbatim.
+        shell: cmd
+        if: runner.os == 'Windows'
+        run: |
+          powershell -NoProfile -Command "(Get-Content 'Start Calculator (Windows).bat') -replace 'where py ', 'where zzz_absent ' -replace 'where python ', 'where zzz_absent ' | Set-Content 'nopython.bat'"
+          findstr /C:"where zzz_absent" nopython.bat > nul || exit /b 1
+          call nopython.bat < nul > out2.txt 2>&1
+          type out2.txt
+          findstr /C:"RUNPY_VERSION=3.12.14" out2.txt > nul || exit /b 1
+          findstr /C:".runtime" out2.txt > nul || exit /b 1
+          if exist .runtime\.download exit /b 1
+
+      - name: macOS -- uses the Python already on the machine
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          ./"Start Calculator (Mac).command" < /dev/null | tee out.txt
+          grep -q "RUNPY_VERSION=3." out.txt
+          test ! -e .runtime
+
+      - name: macOS -- downloads its own Python when the machine has none
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p shim
+          printf '#!/bin/sh\nexit 1\n' > shim/python3
+          chmod +x shim/python3
+          PATH="$PWD/shim:$PATH" ./"Start Calculator (Mac).command" < /dev/null | tee out2.txt
+          grep -q "RUNPY_VERSION=3.12.14" out2.txt
+          grep -q ".runtime" out2.txt
+          test ! -e .runtime/.download
+
 # tests/test_lookup.py is deliberately absent from this workflow. It calls
 # TradingView, so a red build would as often mean "the API was slow" as "the
 # code broke" -- and a suite that cries wolf gets ignored. Run it locally when
