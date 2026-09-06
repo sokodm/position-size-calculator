@@ -29,6 +29,81 @@ right show the inputs and the ATR they were derived from.](docs/screenshot.png)
   every saved position on the spot; switching the ATR timeframe automatically
   re-pulls live price & ATR for all saved positions.
 
+## Install it
+
+No command line, no Git account, nothing to sign up for. Three steps.
+
+### 1. Download the ZIP
+
+Open <https://github.com/sokodm/position-size-calculator>, click the green
+**Code** button near the top right, then click **Download ZIP**. A file called
+`position-size-calculator-main.zip` lands in your **Downloads** folder.
+
+### 2. Unzip it
+
+A ZIP is a whole folder squashed into a single file. Unzipping unpacks it again —
+your computer already knows how, there is nothing extra to install.
+
+- **Mac** — double-click the `.zip` file. A folder named
+  `position-size-calculator-main` appears right next to it. Done.
+- **Windows** — **right-click** the `.zip` file → **Extract All…** → **Extract**.
+  A folder named `position-size-calculator-main` appears.
+
+> **Windows: do not skip the extracting.** Double-clicking a ZIP on Windows only
+> shows you what is inside — it looks like a folder, but it is a preview, and the
+> app cannot run from it. You need the real folder that **Extract All** creates.
+
+Move that folder anywhere you like — Documents, Desktop, wherever. You can rename
+it. The only rule is that the files inside stay together.
+
+### 3. Double-click the start file
+
+Open the folder and double-click:
+
+- **Mac** — `Start Calculator (Mac).command`
+- **Windows** — `Start Calculator (Windows).bat`
+
+A plain black text window opens. The first time, it spends a few minutes
+installing what the app needs — that is normal, and it only happens once. Then
+your browser opens with the calculator in it.
+
+**Leave the black window open while you use the app** — closing it stops the app.
+To use the calculator again another day, double-click the same file; after the
+first time it starts in seconds.
+
+### If it does not start
+
+**It says Python is not installed.** Python is the free programming language this
+calculator is written in, and most Macs and PCs do not come with it.
+
+1. Go to <https://www.python.org/downloads/> and click the big **Download
+   Python** button.
+2. Open the file it downloads and click through the installer.
+3. **Windows only, and this step matters:** on the installer's *first* screen,
+   tick **Add python.exe to PATH** before clicking Install. Skip it and Windows
+   will not be able to find Python afterwards.
+4. Double-click the start file again.
+
+**Mac says the file "cannot be opened because it is from an unidentified
+developer".** macOS blocks anything downloaded from the internet until you vouch
+for it once. **Right-click** `Start Calculator (Mac).command` → **Open** →
+**Open** in the box that appears. You only ever do this once.
+
+**Windows shows a blue "Windows protected your PC" box.** Click **More info**,
+then **Run anyway**. Same idea — Windows is cautious about files from the
+internet.
+
+**The window flashes open and shuts immediately.** Both start files are written
+to stay open and print the reason they stopped, so this almost always means the
+app is being run from inside the ZIP preview rather than a properly extracted
+folder. Go back to step 2.
+
+*Comfortable with a terminal?* `git clone
+https://github.com/sokodm/position-size-calculator.git` and then `python3 run.py`
+(Mac) or `py -3 run.py` (Windows) does exactly the same thing. Python 3.10 or
+newer is the only requirement either way; everything else installs itself into a
+`.venv` folder beside the app.
+
 ## What it works out
 
 You give it four things per position — entry price, ATR multiple, number of
@@ -52,39 +127,6 @@ alike.
 
 If the ATR multiple is wide enough to put the stop at or below zero, the app
 says so instead of quietly reporting a size derived from an unplaceable stop.
-
-## Getting it
-
-```sh
-git clone https://github.com/sokodm/position-size-calculator.git
-cd position-size-calculator
-```
-
-You need **Python 3.10 or newer**. Nothing else — the first launch installs what
-it needs into a `.venv` folder next to these files, and later launches skip
-straight to opening the app.
-
-## Running it
-
-**macOS** — double-click `Start Calculator (Mac).command`
-
-> The first time, macOS may say the file "cannot be opened because it is from an
-> unidentified developer". **Right-click the file → Open → Open.** You only do
-> this once. If it says "permission denied" instead, the executable flag was
-> lost — that happens when the folder arrives as a downloaded ZIP rather than a
-> `git clone`. Open Terminal in this folder and run
-> `chmod +x "Start Calculator (Mac).command"`.
-
-**Windows** — double-click `Start Calculator (Windows).bat`
-
-> If you see "Python is not recognized", install Python from
-> <https://www.python.org/downloads/> and **tick "Add python.exe to PATH"** on
-> the installer's first screen.
-
-Either way a terminal window opens, then your browser. **Leave the terminal
-window open while you use the app** — closing it stops the app.
-
-To run it by hand instead: `python3 run.py` (macOS) or `py -3 run.py` (Windows).
 
 ## First run
 
@@ -139,7 +181,6 @@ Dependencies are pinned in `requirements.txt` and installed into a local
 |---|---|
 | `streamlit==1.62.0` | the UI. Pinned exactly: the app's CSS targets this version's DOM, so a newer Streamlit can shift the layout |
 | `streamlit-aggrid` | the editable positions table |
-| `streamlit-extras` | UI components Streamlit core handles poorly |
 | `tradingview-mcp-server` | price and ATR lookups |
 | `pip-system-certs` | makes Python trust the operating system's certificate store |
 
@@ -149,16 +190,13 @@ the proxy's certificate and every price lookup fails. On a home network it is
 harmless but unnecessary — remove that line from `requirements.txt` if you would
 rather not have it.
 
-The `.venv` folder is roughly **700 MB** and is built for the OS that created
+The `.venv` folder is roughly **435 MB** and is built for the OS that created
 it. It is gitignored, and copying it between machines will not work — let each
 machine build its own on first launch.
 
-Most of that size is not this app. `streamlit-extras` pulls in around 120
-transitive packages, including a Snowflake connector, the AWS SDK, matplotlib
-and plotly — none of which this calculator uses directly. That is worth knowing
-before you install it: it is a large surface for a local tool. `pip install
---dry-run -r requirements.txt` prints the full tree if you want to read it
-first.
+Most of that size is not this app: `pyarrow`, `pandas` and `numpy` alone are
+about 220 MB, and Streamlit requires all three. `pip install --dry-run -r
+requirements.txt` prints the full tree if you want to read it first.
 
 ## Tests
 
