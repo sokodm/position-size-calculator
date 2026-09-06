@@ -49,11 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-13 is Intel and macos-latest is Apple Silicon. Both are here
-        # because the Mac launcher pins a different tarball and SHA-256 per
-        # processor, and a wrong or withdrawn Intel asset would otherwise ship
-        # green -- surfacing only on an Intel Mac that has no other Python.
-        os: [macos-latest, macos-13, windows-latest]
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -97,6 +93,45 @@ jobs:
           findstr /C:"RUNPY_VERSION=3.12.14" out2.txt > nul || exit /b 1
           findstr /C:".runtime" out2.txt > nul || exit /b 1
           if exist .runtime\.download exit /b 1
+
+      - name: Pinned Python hashes still match the published release
+        # macos-latest is Apple Silicon and GitHub has retired its Intel macOS
+        # images, so the x86_64 Mac path has no runner to execute it on. Verify
+        # the asset instead of the machine: every SHA-256 a launcher pins must
+        # equal the one the release publishes. That catches a wrong, withdrawn
+        # or re-cut tarball on all three targets, and needs no Intel hardware.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mac="Start Calculator (Mac).command"
+          win="Start Calculator (Windows).bat"
+          ver=$(sed -n 's/^PY_VERSION="\(.*\)"$/\1/p' "$mac")
+          build=$(sed -n 's/^PY_BUILD="\(.*\)"$/\1/p' "$mac")
+          echo "launchers pin CPython $ver from release $build"
+          curl -fsSL -o SHA256SUMS \
+            "https://github.com/astral-sh/python-build-standalone/releases/download/$build/SHA256SUMS"
+          rc=0
+          for spec in "aarch64-apple-darwin:$mac" \
+                      "x86_64-apple-darwin:$mac" \
+                      "x86_64-pc-windows-msvc:$win"; do
+            triple=${spec%%:*}
+            file=${spec#*:}
+            asset="cpython-$ver+$build-$triple-install_only.tar.gz"
+            # Exact field match: a substring grep also matches every other
+            # Python version's line for the same triple.
+            published=$(awk -v a="$asset" '$2 == a { print $1 }' SHA256SUMS)
+            if [ -z "$published" ]; then
+              echo "FAIL  the release has no $asset"
+              rc=1
+            elif grep -qF "$published" "$file"; then
+              echo "ok    $triple"
+            else
+              echo "FAIL  $triple: $file does not pin $published"
+              rc=1
+            fi
+          done
+          exit $rc
 
       - name: macOS -- uses the Python already on the machine
         if: runner.os == 'macOS'
