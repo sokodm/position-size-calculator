@@ -5,8 +5,12 @@ positions.json
 # Streamlit's run log. Contains your portfolio size in plain text.
 streamlit.log
 
-# ~700 MB, and built for one specific OS -- it will not work on another.
+# ~435 MB, and built for one specific OS -- it will not work on another.
 .venv/
+
+# The private Python the launchers download when the machine has none. Same
+# story: one specific OS and processor, so it never belongs in the repo.
+.runtime/
 
 __pycache__/
 *.py[cod]
