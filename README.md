@@ -169,8 +169,9 @@ python3 tests/test_state.py     # state, validation, sizing maths. No network.
 python3 tests/test_lookup.py    # symbol search and refresh. Needs network.
 ```
 
-`test_state.py` runs in CI on Ubuntu and Windows, against Python 3.10 (the
-floor this project supports) and 3.12. `test_lookup.py` calls TradingView and
+`test_state.py` runs in CI on macOS and Windows — the two platforms the
+launchers target — against Python 3.10 (the floor this project supports) and
+3.12. `test_lookup.py` calls TradingView and
 is run by hand. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for how the tests reach into `app.py`
 without a Streamlit runtime.
