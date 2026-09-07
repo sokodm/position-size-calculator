@@ -2147,12 +2147,54 @@ components.html(
         // Only the file the reader can actually double-click. Naming both on a
         // machine we can identify would make them hunt for a file that is not
         // there; an unrecognised platform falls back to showing both.
-        const ua = W.navigator.userAgent || "";
-        const FILES = /Windows|Win32|Win64/i.test(ua)
+        //
+        // userAgentData.platform is the supported way to ask, and is unaffected
+        // by Chrome freezing the UA string; it is absent in Safari and Firefox,
+        // so both older signals stay as fallbacks. Windows is tested first
+        // because "Macintosh" and "Windows" never co-occur, but a future
+        // platform string that contains neither must land on the both-files
+        // branch rather than being guessed at.
+        const nav = W.navigator;
+        const plat = (nav.userAgentData && nav.userAgentData.platform)
+            || nav.platform || "";
+        const ua = nav.userAgent || "";
+        const IS_WIN = /Win/i.test(plat) || /Windows|Win32|Win64/i.test(ua);
+        const IS_MAC = !IS_WIN && (/Mac/i.test(plat) || /Mac/i.test(ua));
+        const FILES = IS_WIN
             ? ["Start Calculator (Windows).bat"]
-            : /Mac/i.test(ua)
+            : IS_MAC
                 ? ["Start Calculator (Mac).command"]
                 : ["Start Calculator (Windows).bat", "Start Calculator (Mac).command"];
+        // Naming the actual file manager keeps the instruction pointing at the
+        // reader's computer rather than at this window -- see the note printed
+        // under the file name below.
+        const FILE_BROWSER = IS_WIN ? "File Explorer"
+            : IS_MAC ? "Finder" : "your file browser";
+
+        // Nothing on a web page can launch a local program, and once the server
+        // is gone there is no process left to ask -- so the start file genuinely
+        // cannot be run from here. What this can do is notice the moment the
+        // reader starts it themselves and come back on its own. Streamlit's own
+        // retry loop gives up after a while; this one keeps waiting.
+        const health = new W.URL("_stcore/health", W.location.href).href;
+        const alive = function () {
+            return W.fetch(health, {cache: "no-store"})
+                .then(function (r) { return r.ok; })
+                // A refused connection is the expected state here, not a fault:
+                // it is exactly what "still stopped" looks like.
+                .catch(function () { return false; });
+        };
+        const watch = function () {
+            if (W.__pscStoppedPoll) return;
+            W.__pscStoppedPoll = W.setInterval(function () {
+                alive().then(function (up) { if (up) W.location.reload(); });
+            }, 2000);
+        };
+        const unwatch = function () {
+            if (!W.__pscStoppedPoll) return;
+            W.clearInterval(W.__pscStoppedPoll);
+            W.__pscStoppedPoll = null;
+        };
 
         const rewrite = function (dialog) {
             const h2 = dialog.querySelector('h2[slot="title"]');
@@ -2175,36 +2217,55 @@ components.html(
             say("It is not running any more \\u2014 usually because the window "
                 + "that started it was closed.");
             say(FILES.length > 1
-                ? "To start it again, open the app's folder and double-click the "
-                  + "start file for your computer:"
-                : "To start it again, open the app's folder and double-click:");
+                ? "To start it again, open the app's folder in " + FILE_BROWSER
+                  + " and double-click the start file for your computer:"
+                : "To start it again, open the app's folder in " + FILE_BROWSER
+                  + " and double-click this file:");
             for (const name of FILES) {
                 const box = D.createElement("div");
-                box.textContent = name;
-                box.style.cssText = "background:#f0f2f6;border-radius:8px;"
-                    + "padding:0.6rem 0.8rem;margin:0 0 0.75rem;font-weight:600;"
-                    + "word-break:break-word;";
+                // A solid rounded panel in the app's own grey reads as a button,
+                // and the one thing this must not invite is a click inside the
+                // dialog: nothing on a web page can open a file on the reader's
+                // machine, so that click does nothing and looks like a fault. The
+                // page icon, dashed edge and monospace name make it look like the
+                // file it is naming; the sentence under it says so outright.
+                box.textContent = "\\uD83D\\uDCC4  " + name;
+                box.style.cssText = "background:#f7f8fa;border:1px dashed #c8ccd4;"
+                    + "border-radius:8px;padding:0.6rem 0.8rem;margin:0 0 0.5rem;"
+                    + "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"
+                    + "monospace;font-weight:600;word-break:break-word;"
+                    + "cursor:default;";
                 body.appendChild(box);
             }
-            say("Then click Reload below.");
+            say(FILES.length > 1
+                ? "Those are files on your computer \\u2014 double-click one in "
+                  + FILE_BROWSER + ". Clicking the names here does nothing."
+                : "That is a file on your computer \\u2014 double-click it in "
+                  + FILE_BROWSER + ". Clicking the name here does nothing.", true);
+            // Deliberately no reload button. The poller below notices the restart
+            // within two seconds and reloads on its own, so a button could only
+            // ever do what is already happening -- and while the app is still
+            // stopped there is nothing for it to do at all, which is exactly what
+            // it looked like from the outside.
+            say("Leave this window open \\u2014 it comes back on its own a moment "
+                + "after the app starts.");
             // The first thing anyone fears here is having lost their positions.
             say("Your saved positions are safe \\u2014 they are stored in "
                 + "positions.json in that same folder.", true);
 
-            const btn = D.createElement("button");
-            btn.textContent = "Reload";
-            btn.style.cssText = "background:#ff4b4b;color:#fff;border:0;"
-                + "border-radius:8px;padding:0.5rem 1rem;font-size:1rem;"
-                + "font-weight:600;cursor:pointer;";
-            btn.addEventListener("click", function () { W.location.reload(); });
-            body.appendChild(btn);
+            watch();
         };
 
         if (W.__pscStoppedObserver) W.__pscStoppedObserver.disconnect();
         let queued = false;
         const sweep = function () {
             queued = false;
-            for (const d of D.querySelectorAll('[data-testid="stDialog"]')) rewrite(d);
+            const dialogs = D.querySelectorAll('[data-testid="stDialog"]');
+            // Streamlit reconnects on its own if the app returns quickly enough.
+            // Stop polling when it does, or the next poll would reload a page
+            // that has already recovered.
+            if (!dialogs.length) unwatch();
+            for (const d of dialogs) rewrite(d);
         };
         // Rewriting sets text the guard above no longer matches, so our own
         // writes end the cycle instead of retriggering it. Debounced into the
