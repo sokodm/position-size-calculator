@@ -66,7 +66,17 @@ os.environ.setdefault("TRADINGVIEW_MCP_MIN_INTERVAL_S", "0.05")
 
 from tradingview_mcp.core.services.screener_service import analyze_coin  # noqa: E402
 
-DATA_FILE = Path(__file__).parent / "positions.json"
+APP_DIR = Path(__file__).parent
+DATA_FILE = APP_DIR / "positions.json"
+
+# Shown in the stopped-app dialog as the folder holding the start files, so the
+# reader gets a path they can actually follow. It has to be derived rather than
+# written down: a GitHub "Download ZIP" unpacks to position-size-calculator-main,
+# a clone gives position-size-calculator, and a renamed folder gives something
+# else again -- any literal here would be wrong for most readers. This is the
+# folder the running app is in, which is by definition the right one, and it
+# carries no absolute path and no user name.
+APP_DIR_NAME = APP_DIR.name
 
 # ag-Grid is TOLD these heights (headerHeight/rowHeight in configure_grid_options),
 # so any AgGrid() call that also sizes its iframe by row count must derive that
@@ -2160,14 +2170,27 @@ components.html(
         const ua = nav.userAgent || "";
         const IS_WIN = /Win/i.test(plat) || /Windows|Win32|Win64/i.test(ua);
         const IS_MAC = !IS_WIN && (/Mac/i.test(plat) || /Mac/i.test(ua));
-        const FILES = IS_WIN
-            ? ["Start Calculator (Windows).bat"]
-            : IS_MAC
-                ? ["Start Calculator (Mac).command"]
-                : ["Start Calculator (Windows).bat", "Start Calculator (Mac).command"];
+        // The bare file name alone does not say where to look, and this folder
+        // has no single name to write down: a "Download ZIP" unpacks to
+        // position-size-calculator-main, a clone gives position-size-calculator,
+        // and a renamed folder gives a third answer -- so Python injects the
+        // folder the app is actually running from. Relative on purpose: the full
+        // path would carry the reader's user name for no benefit, since they got
+        // to this folder themselves to start the app in the first place.
+        //
+        // The separator belongs to the file, not to the reader: on an
+        // unrecognised platform both files are listed, and a backslash in the
+        // Mac path (or a slash in the Windows one) would name a path that does
+        // not exist on either machine.
+        const FOLDER = """ + json.dumps(APP_DIR_NAME) + """;
+        const WIN_FILE = FOLDER + "\\\\Start Calculator (Windows).bat";
+        const MAC_FILE = FOLDER + "/Start Calculator (Mac).command";
+        const FILES = IS_WIN ? [WIN_FILE]
+            : IS_MAC ? [MAC_FILE]
+                : [WIN_FILE, MAC_FILE];
         // Naming the actual file manager keeps the instruction pointing at the
-        // reader's computer rather than at this window -- see the note printed
-        // under the file name below.
+        // reader's computer rather than at this window, which is the one place
+        // the file cannot be opened from.
         const FILE_BROWSER = IS_WIN ? "File Explorer"
             : IS_MAC ? "Finder" : "your file browser";
 
@@ -2211,47 +2234,63 @@ components.html(
                 const p = D.createElement("p");
                 p.textContent = text;
                 p.style.margin = "0 0 0.75rem";
-                if (muted) { p.style.fontSize = "0.85em"; p.style.opacity = "0.75"; }
+                // Streamlit sizes dialog body copy for a paragraph of prose;
+                // this dialog is two short lines around a file name, and at
+                // that size they read as a warning rather than an instruction.
+                p.style.fontSize = muted ? "0.8em" : "0.9em";
+                if (muted) { p.style.opacity = "0.75"; }
                 body.appendChild(p);
             };
-            say("It is not running any more \\u2014 usually because the window "
-                + "that started it was closed.");
+            // One instruction and one reassurance, and nothing else. Earlier
+            // drafts also explained why it had stopped, that the box below is a
+            // real file rather than a button, and where the positions are
+            // stored -- five paragraphs that buried the only sentence anyone
+            // has to act on. Naming the file browser carries the "this lives on
+            // your computer" point on its own.
             say(FILES.length > 1
-                ? "To start it again, open the app's folder in " + FILE_BROWSER
-                  + " and double-click the start file for your computer:"
-                : "To start it again, open the app's folder in " + FILE_BROWSER
-                  + " and double-click this file:");
+                ? "To start it again, double-click the file for your computer in "
+                  + FILE_BROWSER + ":"
+                : "To start it again, double-click this file in "
+                  + FILE_BROWSER + ":");
             for (const name of FILES) {
                 const box = D.createElement("div");
                 // A solid rounded panel in the app's own grey reads as a button,
                 // and the one thing this must not invite is a click inside the
                 // dialog: nothing on a web page can open a file on the reader's
                 // machine, so that click does nothing and looks like a fault. The
-                // page icon, dashed edge and monospace name make it look like the
-                // file it is naming; the sentence under it says so outright.
+                // page icon, dashed edge and monospace name make it look like
+                // the file it is naming rather than something to press.
                 box.textContent = "\\uD83D\\uDCC4  " + name;
+                // Kept to one line: a path broken across two lines reads as two
+                // things, and the break lands mid-word because the only wrap
+                // opportunities in it are the separator and the spaces in the
+                // file name.
                 box.style.cssText = "background:#f7f8fa;border:1px dashed #c8ccd4;"
                     + "border-radius:8px;padding:0.6rem 0.8rem;margin:0 0 0.5rem;"
                     + "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"
-                    + "monospace;font-weight:600;word-break:break-word;"
-                    + "cursor:default;";
+                    + "monospace;font-weight:600;white-space:nowrap;"
+                    + "overflow-x:auto;font-size:13px;cursor:default;";
                 body.appendChild(box);
+                // Shrink to fit rather than pick a size: the folder name is
+                // whatever the reader called their folder, so the width this
+                // has to survive is not knowable in advance -- only measurable,
+                // and only once the box is in the document. The floor keeps it
+                // readable; a name long enough to overflow even at 9px scrolls
+                // instead, which still shows the whole path.
+                for (let px = 12; px >= 9 && box.scrollWidth > box.clientWidth; px--) {
+                    box.style.fontSize = px + "px";
+                }
             }
-            say(FILES.length > 1
-                ? "Those are files on your computer \\u2014 double-click one in "
-                  + FILE_BROWSER + ". Clicking the names here does nothing."
-                : "That is a file on your computer \\u2014 double-click it in "
-                  + FILE_BROWSER + ". Clicking the name here does nothing.", true);
             // Deliberately no reload button. The poller below notices the restart
             // within two seconds and reloads on its own, so a button could only
             // ever do what is already happening -- and while the app is still
             // stopped there is nothing for it to do at all, which is exactly what
-            // it looked like from the outside.
-            say("Leave this window open \\u2014 it comes back on its own a moment "
-                + "after the app starts.");
-            // The first thing anyone fears here is having lost their positions.
-            say("Your saved positions are safe \\u2014 they are stored in "
-                + "positions.json in that same folder.", true);
+            // it looked like from the outside. Hence the first half of this line:
+            // without it, a page that sits there is indistinguishable from a
+            // page that has given up. The second half answers the thing anyone
+            // fears here before they ask it.
+            say("This page comes back on its own once it starts. "
+                + "Your positions are saved.", true);
 
             watch();
         };
