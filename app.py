@@ -3165,9 +3165,9 @@ components.html(
         // Re-deriving on mutations fixes it from either direction, and cannot
         // loop: sync() only ever assigns, and assigning a value a property
         // already holds mutates nothing, so the observer goes quiet by itself.
-        // Filtered to the three attributes that can change the answer, so a
-        // rerun's ordinary DOM churn does not wake it (the grid is in its own
-        // iframe and never reaches this document).
+        // Filtered to just the attributes below -- the only ones that can
+        // change the answer -- so a rerun's ordinary DOM churn does not wake
+        // it (the grid is in its own iframe and never reaches this document).
         if (W.__pfSearchGateObs) W.__pfSearchGateObs.disconnect();
         W.__pfSearchGateObs = new W.MutationObserver(function () {
             clearTimeout(W.__pfSearchGateTimer);
