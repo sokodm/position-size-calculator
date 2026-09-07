@@ -3220,8 +3220,126 @@ else:
     # leaves an empty strip right of the last column. Only visible columns
     # count. A 0-width viewport (not laid out yet at the 50ms mark) must retry,
     # not proceed -- proceeding takes the lock-everything branch by accident.
+
+    # When the window is too narrow for every column, the table just scrolls --
+    # and on a trackpad with overlay scroll bars there is nothing on screen
+    # saying so, which is how a reader concludes the columns to the right do not
+    # exist. This puts a round chevron on each border of the table, centred
+    # vertically, each one showing whenever there are columns hidden that way.
+    # Text was tried there first and read as part of whatever it sat next to
+    # ("Tranche Size ($)" plus a "more" pill scans as one label); an icon on the
+    # edge it points at does not.
+    #
+    # Every handler below re-evaluates the same condition, so the body is
+    # installed on window once and they all call it: each JsCode is eval'd as
+    # an independent function and cannot otherwise share a definition.
+    #
+    # The argument splits the cheap half from the expensive one. Only a resize
+    # or a re-render can move a row, and the vertical placement below measures
+    # every row to find one -- so a horizontal scroll, which fires many times a
+    # second and cannot change any row's top, asks for the visibility half
+    # alone. Measuring on every tick forced a reflow per row per event.
+    _MORE_HINT_INSTALL_JS = (
+        "if (!window.pscSyncMoreHint) { window.pscSyncMoreHint = function(remeasure){ "
+        "var vp = document.querySelector('.ag-center-cols-viewport'); "
+        "if (!vp) { return; } "
+        "var wrapper = vp.closest('.ag-root-wrapper'); "
+        "if (!wrapper) { return; } "
+        # One builder for both, so the two buttons cannot drift apart in size,
+        # colour or scroll step -- only the direction differs.
+        "var build = function(cls, points, dir, label){ "
+        "var el = wrapper.querySelector('.' + cls); "
+        "if (el) { return el; } "
+        "el = document.createElement('div'); "
+        "el.className = 'psc-scroll-hint ' + cls; "
+        "el.title = label; "
+        "el.setAttribute('role', 'button'); "
+        "el.setAttribute('aria-label', label); "
+        # Announced as a button, so it has to work like one: a bare div with
+        # role=button is not in the tab order and Enter/Space do nothing on it.
+        # tabIndex is set here for the case where the element is built already
+        # visible, and re-set by show() below on every state change.
+        "el.tabIndex = -1; "
+        # An SVG rather than a "›" glyph: the chevron characters render at
+        # wildly different sizes and baselines across fonts, so a text one
+        # cannot be reliably centred in a 20px circle.
+        "el.innerHTML = '<svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" "
+        "fill=\"none\" stroke=\"#5a6270\" stroke-width=\"3.5\" "
+        "stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+        "<polyline points=\"' + points + '\"></polyline></svg>'; "
+        # A round chevron reads as a control, so it behaves like one. The
+        # viewport is re-queried on each click rather than captured: ag-Grid
+        # rebuilds these nodes on a column change, and a stale reference would
+        # scroll a detached element. It mirrors the header and pinned viewports
+        # off this one's scroll event, so setting scrollLeft is the whole job.
+        "var scroll = function(){ "
+        "var v = document.querySelector('.ag-center-cols-viewport'); "
+        "if (v) { v.scrollLeft += dir * v.clientWidth * 0.8; } }; "
+        "el.addEventListener('click', scroll); "
+        # Space would scroll the page as well without the preventDefault, so
+        # one keypress would move both the table and the document.
+        "el.addEventListener('keydown', function(e){ "
+        "if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { "
+        "e.preventDefault(); scroll(); } }); "
+        "wrapper.appendChild(el); "
+        "return el; "
+        "}; "
+        "var next = build('psc-more-cols', '9 5 16 12 9 19', 1, "
+        "'Scroll right for more columns'); "
+        "var prev = build('psc-prev-cols', '15 5 8 12 15 19', -1, "
+        "'Scroll left for earlier columns'); "
+        # Mid-table vertically, but snapped to the nearest gap BETWEEN rows
+        # rather than the literal 50%. The circles are 20px on a 42px row, so
+        # sitting in a row's middle puts them over that row's figures -- with
+        # the numbers left-aligned, the left-hand one was measured covering 22
+        # of the 30px of a "7.88". A row boundary is the one horizontal strip
+        # with no text in it, because a 42px row centres roughly 14px of
+        # glyphs. The move is a few pixels and reads as the middle either way.
+        # Measured, not derived from GRID_ROW_HEIGHT: a wrapped header or a
+        # theme that rounds row heights would put a computed offset back inside
+        # the text. The header/first-row boundary counts as a candidate so that
+        # a one-position table still gets a real gap -- it overflows just the
+        # same, and 50% of a header plus one row lands in that row's digits.
+        # With more rows the nearest-to-middle test never picks it anyway. The
+        # boundary below the LAST row is excluded: the circle would hang half
+        # outside the grid, where it gets clipped.
+        "var rows = remeasure ? wrapper.querySelectorAll("
+        "'.ag-center-cols-container .ag-row') : []; "
+        "if (rows.length > 0) { "
+        "var wb = wrapper.getBoundingClientRect(); "
+        "var mid = wb.height / 2, best = null; "
+        "for (var i = 0; i < rows.length; i++) { "
+        "var edge = rows[i].getBoundingClientRect().top - wb.top; "
+        "if (best === null || Math.abs(edge - mid) < Math.abs(best - mid)) { "
+        "best = edge; } "
+        "} "
+        "next.style.top = best + 'px'; "
+        "prev.style.top = best + 'px'; "
+        "} "
+        # Fractional column widths leave scrollWidth a fraction above
+        # clientWidth on a table that fits perfectly well, so a bare "> 0"
+        # would leave the right-hand chevron showing permanently on a maximised
+        # window. The left one uses the same tolerance for symmetry.
+        # Hidden has to mean gone from the accessibility tree and the tab order
+        # too, not merely transparent: both circles stay in the DOM at every
+        # window width, so a screen reader or a Tab key would otherwise reach
+        # two buttons that scroll nothing.
+        "var show = function(el, on){ "
+        "el.classList.toggle('psc-visible', on); "
+        "el.setAttribute('aria-hidden', on ? 'false' : 'true'); "
+        "el.tabIndex = on ? 0 : -1; "
+        "}; "
+        "var hidden = vp.scrollWidth - vp.clientWidth - vp.scrollLeft; "
+        "show(next, hidden > 2); "
+        "show(prev, vp.scrollLeft > 2); "
+        "}; } "
+    )
+    _MORE_HINT_JS = JsCode(
+        "function(params){ " + _MORE_HINT_INSTALL_JS + "window.pscSyncMoreHint(); }"
+    )
     _FIT_COLUMNS_JS = JsCode(
         "function(params){ "
+        + _MORE_HINT_INSTALL_JS +
         "var attempt = function(tries){ "
         "var FILLER = 'Exchange'; "
         "var visible = params.api.getColumnState().filter(function(s){ return !s.hide; }); "
@@ -3247,6 +3365,10 @@ else:
         "limits.push({key: FILLER, minWidth: fillerNatural, maxWidth: fillerNatural}); "
         "} "
         "params.api.sizeColumnsToFit({columnLimits: limits}); "
+        # Deferred a tick: the widths above are applied to the DOM before the
+        # browser recomputes scrollWidth, so reading it here still returns the
+        # pre-resize value and the hint would lag one resize behind.
+        "setTimeout(function(){ window.pscSyncMoreHint(true); }, 0); "
         "}; "
         "setTimeout(function(){ attempt(5); }, 50); }"
     )
@@ -3301,6 +3423,9 @@ else:
         includeHiddenColumnsInQuickFilter=True,
         onFirstDataRendered=_FIT_COLUMNS_JS,
         onGridSizeChanged=_FIT_COLUMNS_JS,
+        # Scrolling is the one thing that changes how much is still hidden
+        # without changing any column width, so it needs its own handler.
+        onBodyScroll=_MORE_HINT_JS,
     )
     grid_options = gb.build()
 
@@ -3314,6 +3439,16 @@ else:
             "padding-left": "6px !important",
             "padding-right": "6px !important",
             "font-size": "14px !important",
+        },
+        # type=["numericColumn"] is kept for its numeric sort and filter, but the
+        # right alignment that comes with it puts every digit against the far
+        # edge of its column -- which is the part that gets clipped when the
+        # table is wider than the window, so a half-visible column showed an
+        # empty cell rather than a number. Left-aligned, a value is readable as
+        # soon as any part of its column is on screen.
+        ".ag-cell.ag-right-aligned-cell": {
+            "text-align": "left !important",
+            "justify-content": "flex-start !important",
         },
         ".ag-header-cell": {
             "border-right": "1px solid #c2c2c2 !important",
@@ -3337,6 +3472,59 @@ else:
         '.ag-header-cell[col-id="Tranche Size ($)"] .ag-header-cell-text': {
             "font-weight": "700",
         },
+        # Built and toggled by _MORE_HINT_INSTALL_JS above. Absolutely
+        # positioned inside .ag-root-wrapper (already position:relative) so the
+        # pair costs no layout height -- grid_height below stays exactly a
+        # header plus its rows, which is what keeps the last row from clipping.
+        # Each is centred on the border it points at: a white disc with a grey
+        # rim. The chevron's #5a6270 on white measures about 6:1, well past the
+        # 3:1 WCAG 1.4.11 asks of a graphical control.
+        ".psc-scroll-hint": {
+            "position": "absolute",
+            "top": "50%",
+            "transform": "translateY(-50%)",
+            "display": "flex",
+            "align-items": "center",
+            "justify-content": "center",
+            "width": "20px",
+            "height": "20px",
+            "border-radius": "50%",
+            "background": "#ffffff",
+            # The rim is load-bearing, not decoration: an all-white disc on
+            # white cells has no edge at all, and the grey also stops the cell
+            # and header borders underneath from appearing to run through it.
+            # #c2c2c2 is the same grey as the grid's own cell borders.
+            # A box-shadow ring rather than a border, so the rim does not
+            # enlarge the 20px box the chevron is centred in.
+            "box-shadow": "0 0 0 1px #c2c2c2, 0 1px 3px rgba(0,0,0,0.14)",
+            "cursor": "pointer",
+            "z-index": "20",
+            "opacity": "0",
+            "transition": "opacity 120ms ease",
+            # Invisible has to mean non-interactive as well: on a window wide
+            # enough to show every column the circles are still in the DOM, and
+            # without this they would keep swallowing clicks on the cells under
+            # them.
+            "pointer-events": "none",
+        },
+        # One condition only: psc-visible says there are columns hidden that
+        # way, measured in _MORE_HINT_INSTALL_JS. Deliberately NOT also gated
+        # on hovering the table -- the hint exists for a reader who does not
+        # know the table scrolls, and one they have to find by pointing at it
+        # cannot tell them that.
+        ".psc-scroll-hint.psc-visible": {
+            "opacity": "1",
+            "pointer-events": "auto",
+        },
+        # These are in the tab order while visible, so they need a focus ring,
+        # and the disc already spends its box-shadow on the rim. An outline
+        # draws outside the box and does not compete with it.
+        ".psc-scroll-hint:focus-visible": {
+            "outline": "2px solid #1f6feb",
+            "outline-offset": "2px",
+        },
+        ".psc-more-cols": {"right": "6px"},
+        ".psc-prev-cols": {"left": "6px"},
     }
 
     # height=None (domLayout: autoHeight) relies on the component calling back
