@@ -4,8 +4,22 @@ primaryColor = "#5DADE2"
 [client]
 # Streamlit's default is "auto", which shows developer controls whenever the
 # app is served from localhost -- and this app is ALWAYS served from localhost,
-# so every user gets them. That means a "Rerun / Always rerun" bar whenever
-# app.py changes on disk, plus Clear cache and Deploy in the menu. None of it
-# means anything to someone using this as a calculator. "viewer" drops exactly
-# those and keeps the print and theme options.
+# so every user gets them. That means Clear cache and Deploy in the menu, which
+# mean nothing to someone using this as a calculator. "viewer" drops those and
+# keeps the print and theme options.
+#
+# It does NOT drop the "File change / Rerun / Always rerun" bar, despite what
+# this comment used to claim -- that prompt comes from the file watcher below,
+# not from the toolbar, and it kept appearing with this already set.
 toolbarMode = "viewer"
+
+[server]
+# The watcher exists so a developer editing app.py gets asked to rerun. Nobody
+# running this as a calculator ever edits app.py, so the only thing the prompt
+# can do for them is appear unexplained over their positions -- and it does,
+# because a Git pull or a re-download rewrites the file underneath a running
+# app. "none" means there is nothing watching and so nothing to prompt about.
+#
+# Consequence to know about when working on this app: source edits no longer
+# show up by themselves, so restart the app to pick them up.
+fileWatcherType = "none"

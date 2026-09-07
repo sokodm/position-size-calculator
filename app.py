@@ -66,7 +66,17 @@ os.environ.setdefault("TRADINGVIEW_MCP_MIN_INTERVAL_S", "0.05")
 
 from tradingview_mcp.core.services.screener_service import analyze_coin  # noqa: E402
 
-DATA_FILE = Path(__file__).parent / "positions.json"
+APP_DIR = Path(__file__).parent
+DATA_FILE = APP_DIR / "positions.json"
+
+# Shown in the stopped-app dialog as the folder holding the start files, so the
+# reader gets a path they can actually follow. It has to be derived rather than
+# written down: a GitHub "Download ZIP" unpacks to position-size-calculator-main,
+# a clone gives position-size-calculator, and a renamed folder gives something
+# else again -- any literal here would be wrong for most readers. This is the
+# folder the running app is in, which is by definition the right one, and it
+# carries no absolute path and no user name.
+APP_DIR_NAME = APP_DIR.name
 
 # ag-Grid is TOLD these heights (headerHeight/rowHeight in configure_grid_options),
 # so any AgGrid() call that also sizes its iframe by row count must derive that
@@ -2115,6 +2125,210 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Streamlit's own disconnect dialog says "Is Streamlit still running? ... just
+# restart it in your terminal: streamlit run yourscript.py" -- a command these
+# users never type, naming a file that does not exist here. It appears exactly
+# when the Python process is gone, so nothing server-side can reach it: this
+# runs while the app is alive and keeps working in the dead page afterwards,
+# which is also why it must be a components.html iframe (st.markdown never
+# executes <script>). Keyed on the <h2> text rather than a "done" marker, so a
+# React re-render that restores Streamlit's own wording is simply rewritten
+# again -- and so an unrelated st.dialog is never touched.
+components.html(
+    """
+    <script>
+    try {
+        const W = window.parent;
+        const D = W.document;
+
+        // height=0 leaves a wrapper that still claims a slot in the page's flex
+        // column, costing a measured 16px gap under the title. Streamlit 1.62
+        // does not put that height in an HTML attribute, so a CSS rule keyed on
+        // iframe[height="0"] matches nothing; the iframe finds its own wrapper
+        // instead, which cannot go stale. Hiding it does not stop this script --
+        // it has already run, and observers fire regardless of display.
+        for (const f of D.querySelectorAll("iframe")) {
+            if (f.contentWindow !== window) continue;
+            const slot = f.closest('[data-testid="stElementContainer"]');
+            if (slot) slot.style.display = "none";
+            break;
+        }
+
+        // Only the file the reader can actually double-click. Naming both on a
+        // machine we can identify would make them hunt for a file that is not
+        // there; an unrecognised platform falls back to showing both.
+        //
+        // userAgentData.platform is the supported way to ask, and is unaffected
+        // by Chrome freezing the UA string; it is absent in Safari and Firefox,
+        // so both older signals stay as fallbacks. Windows is tested first
+        // because "Macintosh" and "Windows" never co-occur, but a future
+        // platform string that contains neither must land on the both-files
+        // branch rather than being guessed at.
+        const nav = W.navigator;
+        const plat = (nav.userAgentData && nav.userAgentData.platform)
+            || nav.platform || "";
+        const ua = nav.userAgent || "";
+        const IS_WIN = /Win/i.test(plat) || /Windows|Win32|Win64/i.test(ua);
+        const IS_MAC = !IS_WIN && (/Mac/i.test(plat) || /Mac/i.test(ua));
+        // The bare file name alone does not say where to look, and this folder
+        // has no single name to write down: a "Download ZIP" unpacks to
+        // position-size-calculator-main, a clone gives position-size-calculator,
+        // and a renamed folder gives a third answer -- so Python injects the
+        // folder the app is actually running from. Relative on purpose: the full
+        // path would carry the reader's user name for no benefit, since they got
+        // to this folder themselves to start the app in the first place.
+        //
+        // The separator belongs to the file, not to the reader: on an
+        // unrecognised platform both files are listed, and a backslash in the
+        // Mac path (or a slash in the Windows one) would name a path that does
+        // not exist on either machine.
+        const FOLDER = """ + json.dumps(APP_DIR_NAME) + """;
+        const WIN_FILE = FOLDER + "\\\\Start Calculator (Windows).bat";
+        const MAC_FILE = FOLDER + "/Start Calculator (Mac).command";
+        const FILES = IS_WIN ? [WIN_FILE]
+            : IS_MAC ? [MAC_FILE]
+                : [WIN_FILE, MAC_FILE];
+        // Naming the actual file manager keeps the instruction pointing at the
+        // reader's computer rather than at this window, which is the one place
+        // the file cannot be opened from.
+        const FILE_BROWSER = IS_WIN ? "File Explorer"
+            : IS_MAC ? "Finder" : "your file browser";
+
+        // Nothing on a web page can launch a local program, and once the server
+        // is gone there is no process left to ask -- so the start file genuinely
+        // cannot be run from here. What this can do is notice the moment the
+        // reader starts it themselves and come back on its own. Streamlit's own
+        // retry loop gives up after a while; this one keeps waiting.
+        const health = new W.URL("_stcore/health", W.location.href).href;
+        const alive = function () {
+            return W.fetch(health, {cache: "no-store"})
+                .then(function (r) { return r.ok; })
+                // A refused connection is the expected state here, not a fault:
+                // it is exactly what "still stopped" looks like.
+                .catch(function () { return false; });
+        };
+        const watch = function () {
+            if (W.__pscStoppedPoll) return;
+            W.__pscStoppedPoll = W.setInterval(function () {
+                alive().then(function (up) { if (up) W.location.reload(); });
+            }, 2000);
+        };
+        const unwatch = function () {
+            if (!W.__pscStoppedPoll) return;
+            W.clearInterval(W.__pscStoppedPoll);
+            W.__pscStoppedPoll = null;
+        };
+
+        const rewrite = function (dialog) {
+            const h2 = dialog.querySelector('h2[slot="title"]');
+            if (!h2 || h2.textContent.trim() !== "Connection error") return;
+            // Streamlit puts the message and the code block in the element
+            // straight after the title. If that ever stops being true we leave
+            // the dialog exactly as Streamlit built it rather than half-edit it.
+            const body = h2.nextElementSibling;
+            if (!body) return;
+
+            h2.textContent = "The calculator has stopped";
+            body.textContent = "";
+            const say = function (text, muted) {
+                const p = D.createElement("p");
+                p.textContent = text;
+                p.style.margin = "0 0 0.75rem";
+                // Streamlit sizes dialog body copy for a paragraph of prose;
+                // this dialog is two short lines around a file name, and at
+                // that size they read as a warning rather than an instruction.
+                p.style.fontSize = muted ? "0.8em" : "0.9em";
+                if (muted) { p.style.opacity = "0.75"; }
+                body.appendChild(p);
+            };
+            // One instruction and one reassurance, and nothing else. Earlier
+            // drafts also explained why it had stopped, that the box below is a
+            // real file rather than a button, and where the positions are
+            // stored -- five paragraphs that buried the only sentence anyone
+            // has to act on. Naming the file browser carries the "this lives on
+            // your computer" point on its own.
+            say(FILES.length > 1
+                ? "To start it again, double-click the file for your computer in "
+                  + FILE_BROWSER + ":"
+                : "To start it again, double-click this file in "
+                  + FILE_BROWSER + ":");
+            for (const name of FILES) {
+                const box = D.createElement("div");
+                // A solid rounded panel in the app's own grey reads as a button,
+                // and the one thing this must not invite is a click inside the
+                // dialog: nothing on a web page can open a file on the reader's
+                // machine, so that click does nothing and looks like a fault. The
+                // page icon, dashed edge and monospace name make it look like
+                // the file it is naming rather than something to press.
+                box.textContent = "\\uD83D\\uDCC4  " + name;
+                // Kept to one line: a path broken across two lines reads as two
+                // things, and the break lands mid-word because the only wrap
+                // opportunities in it are the separator and the spaces in the
+                // file name.
+                box.style.cssText = "background:#f7f8fa;border:1px dashed #c8ccd4;"
+                    + "border-radius:8px;padding:0.6rem 0.8rem;margin:0 0 0.5rem;"
+                    + "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"
+                    + "monospace;font-weight:600;white-space:nowrap;"
+                    + "overflow-x:auto;font-size:13px;cursor:default;";
+                body.appendChild(box);
+                // Shrink to fit rather than pick a size: the folder name is
+                // whatever the reader called their folder, so the width this
+                // has to survive is not knowable in advance -- only measurable,
+                // and only once the box is in the document. The floor keeps it
+                // readable; a name long enough to overflow even at 9px scrolls
+                // instead, which still shows the whole path.
+                for (let px = 12; px >= 9 && box.scrollWidth > box.clientWidth; px--) {
+                    box.style.fontSize = px + "px";
+                }
+            }
+            // Deliberately no reload button. The poller below notices the restart
+            // within two seconds and reloads on its own, so a button could only
+            // ever do what is already happening -- and while the app is still
+            // stopped there is nothing for it to do at all, which is exactly what
+            // it looked like from the outside. Hence the first half of this line:
+            // without it, a page that sits there is indistinguishable from a
+            // page that has given up. The second half answers the thing anyone
+            // fears here before they ask it.
+            say("This page comes back on its own once it starts. "
+                + "Your positions are saved.", true);
+
+            watch();
+        };
+
+        if (W.__pscStoppedObserver) W.__pscStoppedObserver.disconnect();
+        let queued = false;
+        const sweep = function () {
+            queued = false;
+            const dialogs = D.querySelectorAll('[data-testid="stDialog"]');
+            // Streamlit reconnects on its own if the app returns quickly enough.
+            // Stop polling when it does, or the next poll would reload a page
+            // that has already recovered.
+            if (!dialogs.length) unwatch();
+            for (const d of dialogs) rewrite(d);
+        };
+        // Rewriting sets text the guard above no longer matches, so our own
+        // writes end the cycle instead of retriggering it. Debounced into the
+        // frame before paint, so the replacement is what first appears rather
+        // than a flash of Streamlit's wording.
+        W.__pscStoppedObserver = new W.MutationObserver(function () {
+            if (queued) return;
+            queued = true;
+            W.requestAnimationFrame(sweep);
+        });
+        W.__pscStoppedObserver.observe(D.body, {childList: true, subtree: true});
+        sweep();
+    } catch (e) {
+        // Nothing to sanity-check at install time -- the dialog this targets
+        // does not exist until the server dies -- so a failure to reach the
+        // parent document is the only signal available, and it must not be
+        // swallowed by an invisible iframe.
+        console.error("[stopped-app dialog] install failed", e);
+    }
+    </script>
+    """,
+    height=0,
+)
+
 # Must run before the first widget is created: adopting newer values means
 # assigning to widget-backed keys (timeframe_label is one), which Streamlit
 # rejects once that widget has been instantiated in the current run.
@@ -3045,8 +3259,126 @@ else:
     # leaves an empty strip right of the last column. Only visible columns
     # count. A 0-width viewport (not laid out yet at the 50ms mark) must retry,
     # not proceed -- proceeding takes the lock-everything branch by accident.
+
+    # When the window is too narrow for every column, the table just scrolls --
+    # and on a trackpad with overlay scroll bars there is nothing on screen
+    # saying so, which is how a reader concludes the columns to the right do not
+    # exist. This puts a round chevron on each border of the table, centred
+    # vertically, each one showing whenever there are columns hidden that way.
+    # Text was tried there first and read as part of whatever it sat next to
+    # ("Tranche Size ($)" plus a "more" pill scans as one label); an icon on the
+    # edge it points at does not.
+    #
+    # Every handler below re-evaluates the same condition, so the body is
+    # installed on window once and they all call it: each JsCode is eval'd as
+    # an independent function and cannot otherwise share a definition.
+    #
+    # The argument splits the cheap half from the expensive one. Only a resize
+    # or a re-render can move a row, and the vertical placement below measures
+    # every row to find one -- so a horizontal scroll, which fires many times a
+    # second and cannot change any row's top, asks for the visibility half
+    # alone. Measuring on every tick forced a reflow per row per event.
+    _MORE_HINT_INSTALL_JS = (
+        "if (!window.pscSyncMoreHint) { window.pscSyncMoreHint = function(remeasure){ "
+        "var vp = document.querySelector('.ag-center-cols-viewport'); "
+        "if (!vp) { return; } "
+        "var wrapper = vp.closest('.ag-root-wrapper'); "
+        "if (!wrapper) { return; } "
+        # One builder for both, so the two buttons cannot drift apart in size,
+        # colour or scroll step -- only the direction differs.
+        "var build = function(cls, points, dir, label){ "
+        "var el = wrapper.querySelector('.' + cls); "
+        "if (el) { return el; } "
+        "el = document.createElement('div'); "
+        "el.className = 'psc-scroll-hint ' + cls; "
+        "el.title = label; "
+        "el.setAttribute('role', 'button'); "
+        "el.setAttribute('aria-label', label); "
+        # Announced as a button, so it has to work like one: a bare div with
+        # role=button is not in the tab order and Enter/Space do nothing on it.
+        # tabIndex is set here for the case where the element is built already
+        # visible, and re-set by show() below on every state change.
+        "el.tabIndex = -1; "
+        # An SVG rather than a "›" glyph: the chevron characters render at
+        # wildly different sizes and baselines across fonts, so a text one
+        # cannot be reliably centred in a 20px circle.
+        "el.innerHTML = '<svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" "
+        "fill=\"none\" stroke=\"#5a6270\" stroke-width=\"3.5\" "
+        "stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+        "<polyline points=\"' + points + '\"></polyline></svg>'; "
+        # A round chevron reads as a control, so it behaves like one. The
+        # viewport is re-queried on each click rather than captured: ag-Grid
+        # rebuilds these nodes on a column change, and a stale reference would
+        # scroll a detached element. It mirrors the header and pinned viewports
+        # off this one's scroll event, so setting scrollLeft is the whole job.
+        "var scroll = function(){ "
+        "var v = document.querySelector('.ag-center-cols-viewport'); "
+        "if (v) { v.scrollLeft += dir * v.clientWidth * 0.8; } }; "
+        "el.addEventListener('click', scroll); "
+        # Space would scroll the page as well without the preventDefault, so
+        # one keypress would move both the table and the document.
+        "el.addEventListener('keydown', function(e){ "
+        "if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { "
+        "e.preventDefault(); scroll(); } }); "
+        "wrapper.appendChild(el); "
+        "return el; "
+        "}; "
+        "var next = build('psc-more-cols', '9 5 16 12 9 19', 1, "
+        "'Scroll right for more columns'); "
+        "var prev = build('psc-prev-cols', '15 5 8 12 15 19', -1, "
+        "'Scroll left for earlier columns'); "
+        # Mid-table vertically, but snapped to the nearest gap BETWEEN rows
+        # rather than the literal 50%. The circles are 20px on a 42px row, so
+        # sitting in a row's middle puts them over that row's figures -- with
+        # the numbers left-aligned, the left-hand one was measured covering 22
+        # of the 30px of a "7.88". A row boundary is the one horizontal strip
+        # with no text in it, because a 42px row centres roughly 14px of
+        # glyphs. The move is a few pixels and reads as the middle either way.
+        # Measured, not derived from GRID_ROW_HEIGHT: a wrapped header or a
+        # theme that rounds row heights would put a computed offset back inside
+        # the text. The header/first-row boundary counts as a candidate so that
+        # a one-position table still gets a real gap -- it overflows just the
+        # same, and 50% of a header plus one row lands in that row's digits.
+        # With more rows the nearest-to-middle test never picks it anyway. The
+        # boundary below the LAST row is excluded: the circle would hang half
+        # outside the grid, where it gets clipped.
+        "var rows = remeasure ? wrapper.querySelectorAll("
+        "'.ag-center-cols-container .ag-row') : []; "
+        "if (rows.length > 0) { "
+        "var wb = wrapper.getBoundingClientRect(); "
+        "var mid = wb.height / 2, best = null; "
+        "for (var i = 0; i < rows.length; i++) { "
+        "var edge = rows[i].getBoundingClientRect().top - wb.top; "
+        "if (best === null || Math.abs(edge - mid) < Math.abs(best - mid)) { "
+        "best = edge; } "
+        "} "
+        "next.style.top = best + 'px'; "
+        "prev.style.top = best + 'px'; "
+        "} "
+        # Fractional column widths leave scrollWidth a fraction above
+        # clientWidth on a table that fits perfectly well, so a bare "> 0"
+        # would leave the right-hand chevron showing permanently on a maximised
+        # window. The left one uses the same tolerance for symmetry.
+        # Hidden has to mean gone from the accessibility tree and the tab order
+        # too, not merely transparent: both circles stay in the DOM at every
+        # window width, so a screen reader or a Tab key would otherwise reach
+        # two buttons that scroll nothing.
+        "var show = function(el, on){ "
+        "el.classList.toggle('psc-visible', on); "
+        "el.setAttribute('aria-hidden', on ? 'false' : 'true'); "
+        "el.tabIndex = on ? 0 : -1; "
+        "}; "
+        "var hidden = vp.scrollWidth - vp.clientWidth - vp.scrollLeft; "
+        "show(next, hidden > 2); "
+        "show(prev, vp.scrollLeft > 2); "
+        "}; } "
+    )
+    _MORE_HINT_JS = JsCode(
+        "function(params){ " + _MORE_HINT_INSTALL_JS + "window.pscSyncMoreHint(); }"
+    )
     _FIT_COLUMNS_JS = JsCode(
         "function(params){ "
+        + _MORE_HINT_INSTALL_JS +
         "var attempt = function(tries){ "
         "var FILLER = 'Exchange'; "
         "var visible = params.api.getColumnState().filter(function(s){ return !s.hide; }); "
@@ -3072,6 +3404,10 @@ else:
         "limits.push({key: FILLER, minWidth: fillerNatural, maxWidth: fillerNatural}); "
         "} "
         "params.api.sizeColumnsToFit({columnLimits: limits}); "
+        # Deferred a tick: the widths above are applied to the DOM before the
+        # browser recomputes scrollWidth, so reading it here still returns the
+        # pre-resize value and the hint would lag one resize behind.
+        "setTimeout(function(){ window.pscSyncMoreHint(true); }, 0); "
         "}; "
         "setTimeout(function(){ attempt(5); }, 50); }"
     )
@@ -3126,6 +3462,9 @@ else:
         includeHiddenColumnsInQuickFilter=True,
         onFirstDataRendered=_FIT_COLUMNS_JS,
         onGridSizeChanged=_FIT_COLUMNS_JS,
+        # Scrolling is the one thing that changes how much is still hidden
+        # without changing any column width, so it needs its own handler.
+        onBodyScroll=_MORE_HINT_JS,
     )
     grid_options = gb.build()
 
@@ -3139,6 +3478,16 @@ else:
             "padding-left": "6px !important",
             "padding-right": "6px !important",
             "font-size": "14px !important",
+        },
+        # type=["numericColumn"] is kept for its numeric sort and filter, but the
+        # right alignment that comes with it puts every digit against the far
+        # edge of its column -- which is the part that gets clipped when the
+        # table is wider than the window, so a half-visible column showed an
+        # empty cell rather than a number. Left-aligned, a value is readable as
+        # soon as any part of its column is on screen.
+        ".ag-cell.ag-right-aligned-cell": {
+            "text-align": "left !important",
+            "justify-content": "flex-start !important",
         },
         ".ag-header-cell": {
             "border-right": "1px solid #c2c2c2 !important",
@@ -3162,6 +3511,59 @@ else:
         '.ag-header-cell[col-id="Tranche Size ($)"] .ag-header-cell-text': {
             "font-weight": "700",
         },
+        # Built and toggled by _MORE_HINT_INSTALL_JS above. Absolutely
+        # positioned inside .ag-root-wrapper (already position:relative) so the
+        # pair costs no layout height -- grid_height below stays exactly a
+        # header plus its rows, which is what keeps the last row from clipping.
+        # Each is centred on the border it points at: a white disc with a grey
+        # rim. The chevron's #5a6270 on white measures about 6:1, well past the
+        # 3:1 WCAG 1.4.11 asks of a graphical control.
+        ".psc-scroll-hint": {
+            "position": "absolute",
+            "top": "50%",
+            "transform": "translateY(-50%)",
+            "display": "flex",
+            "align-items": "center",
+            "justify-content": "center",
+            "width": "20px",
+            "height": "20px",
+            "border-radius": "50%",
+            "background": "#ffffff",
+            # The rim is load-bearing, not decoration: an all-white disc on
+            # white cells has no edge at all, and the grey also stops the cell
+            # and header borders underneath from appearing to run through it.
+            # #c2c2c2 is the same grey as the grid's own cell borders.
+            # A box-shadow ring rather than a border, so the rim does not
+            # enlarge the 20px box the chevron is centred in.
+            "box-shadow": "0 0 0 1px #c2c2c2, 0 1px 3px rgba(0,0,0,0.14)",
+            "cursor": "pointer",
+            "z-index": "20",
+            "opacity": "0",
+            "transition": "opacity 120ms ease",
+            # Invisible has to mean non-interactive as well: on a window wide
+            # enough to show every column the circles are still in the DOM, and
+            # without this they would keep swallowing clicks on the cells under
+            # them.
+            "pointer-events": "none",
+        },
+        # One condition only: psc-visible says there are columns hidden that
+        # way, measured in _MORE_HINT_INSTALL_JS. Deliberately NOT also gated
+        # on hovering the table -- the hint exists for a reader who does not
+        # know the table scrolls, and one they have to find by pointing at it
+        # cannot tell them that.
+        ".psc-scroll-hint.psc-visible": {
+            "opacity": "1",
+            "pointer-events": "auto",
+        },
+        # These are in the tab order while visible, so they need a focus ring,
+        # and the disc already spends its box-shadow on the rim. An outline
+        # draws outside the box and does not compete with it.
+        ".psc-scroll-hint:focus-visible": {
+            "outline": "2px solid #1f6feb",
+            "outline-offset": "2px",
+        },
+        ".psc-more-cols": {"right": "6px"},
+        ".psc-prev-cols": {"left": "6px"},
     }
 
     # height=None (domLayout: autoHeight) relies on the component calling back
