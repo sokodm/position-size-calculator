@@ -1337,6 +1337,23 @@ def reset_symbol_check() -> None:
     st.session_state.pending_symbol_check = None
 
 
+def _clear_grid_selection() -> None:
+    """Drop every checked row in the positions table.
+
+    Remounting the grid under a new key is the ONLY thing that clears
+    ag-grid's client-side selection -- see the note on the AgGrid key for why
+    a custom getRowId cannot, and why the remove path has always done this.
+
+    Called by the actions that change what the table CONTAINS or what its
+    numbers MEAN, so a selection the user has forgotten about cannot outlive
+    the rows it was pointing at: add, remove, refresh, and a timeframe switch.
+    Deliberately NOT called for a search, an inline cell edit, or a
+    portfolio/risk keystroke -- a remount also resets scroll, sort and column
+    widths, which is a poor trade for an action that leaves the rows alone (and
+    for the debounced settings fields would fire mid-typing)."""
+    st.session_state.grid_mount = st.session_state.get("grid_mount", 0) + 1
+
+
 def add_position(match: dict) -> None:
     """Add-position on_click callback. Runs before the next rerun renders any
     widget -- the only point Streamlit allows assigning a live widget's key.
@@ -1377,6 +1394,7 @@ def add_position(match: dict) -> None:
     stale = [k for k in st.session_state if k.startswith("add_match_choice_")]
     for k in ("symbol_check", "pending_symbol_check", *stale):
         st.session_state.pop(k, None)
+    _clear_grid_selection()
     save_state()
 
 
@@ -1716,19 +1734,30 @@ st.markdown(
        the collapsed sidebar's width reserved in the layout, which pushes the
        whole page right by a dead strip on tablet/mobile widths. */
     [data-testid="stSidebar"][aria-expanded="true"] {
-        min-width: 206px !important;
-        max-width: 206px !important;
+        /* 236px, up from 206px, and the driver is the Refresh button: at the
+           1rem label size every button now shares, "Refresh Price & ATR"
+           measures 152px, and a 206px sidebar left only 129px inside that
+           button's padding. Widening the panel is what keeps that label on
+           ONE line without breaking the shared right edge below. */
+        min-width: 236px !important;
+        max-width: 236px !important;
     }
     /* One authoritative width for every control in this sidebar, so Portfolio
        Size, Risk (%) and the Refresh button share a right edge instead of each
-       sizing itself. 155px is what the content-sized Refresh button measured at
-       the 206px width above, so the button does not visibly move; the inputs,
-       which Streamlit stretches to the full 166px column, come in to meet it.
+       sizing itself. 186px is set by the longest button label at the 1rem size
+       every button now shares: "Refresh Price & ATR" needs 152px plus that
+       button's 24px of horizontal padding and its borders, so anything under
+       ~178px puts it on two lines. 10px of slack above that, and 10px short of
+       the 196px content column, so the three controls sit inboard of the panel
+       edge rather than flush against it.
+       Whether Streamlit creates its own commit hint inside these inputs turns
+       on their width, so re-check the sidebar commit-hint rule if this grows:
+       at 186px (a 184px Portfolio Size field) it still creates none, measured.
        Consumed by the input widths, the button width, and the refresh "?"
        offset further down -- change it here only. A label longer than this
        wraps rather than silently breaking the alignment. */
     [data-testid="stSidebar"] {
-        --pf-control-w: 155px;
+        --pf-control-w: 186px;
     }
     /* Explicit sidebar grey: Streamlit's default #f0f2f6 barely separates from
        the white main area (1.121:1), so the sidebar does not read as a distinct
@@ -1746,31 +1775,21 @@ st.markdown(
     [data-testid="stSidebar"] {
         background-color: #e5e9f0;
     }
-    /* The Refresh button's help "?" sits on its own line above the button,
-       flush right -- the same place every widget in this sidebar puts its
-       icon (Streamlit right-aligns it within the label row). It renders as an
-       inline-block span inside a full-width markdown <p>, so text-align is
-       what moves it; there is no flex row here to justify. */
-    .st-key-refresh_help [data-testid="stMarkdownContainer"] {
-        text-align: right;
-        /* Flush with the BUTTON's right edge, not the sidebar's -- aligning to
-           the column left the icon hanging past the control it belongs to.
-           Derived from the shared control width rather than measured, so it
-           tracks any change to it automatically. */
-        padding-right: calc(100% - var(--pf-control-w));
-    }
-    /* The icon otherwise floats in whitespace instead of sitting ON the button
-       the way a widget label sits on its input. Two separate gaps stack up
-       below it: the paragraph's own margin-bottom (16px, zeroed by the rule
-       further down) and the sidebar's flex gap between elements, which only a
-       negative margin can reach. Top is pulled in too: the icon belongs to the
-       button, not to the radio group above it. */
-    .st-key-refresh_help {
-        margin-top: -8px !important;
-        margin-bottom: -13px !important;
-    }
-    .st-key-refresh_help p {
-        margin-bottom: 0 !important;
+    /* Sidebar vertical rhythm. Streamlit's 16px block gap was tuned when every
+       control in here carried its own "?" tooltip trigger beside its label;
+       those are all consolidated into the title's single help panel now, so
+       the same 16px reads as slack -- eight elements were each paying it.
+       Direct child ONLY, for two reasons: nested vertical blocks in here (the
+       refresh spinner slot) set their own gap and must keep it, and this
+       selector is built from attribute selectors, so as a descendant selector
+       it would outrank .st-key-refresh_status's own `gap: 0` and silently
+       reopen the 16px shift that rule exists to remove.
+       Nothing opts out of this any more: the focus-hint chip that used to
+       force a taller gap under Portfolio Size and Risk (%) now sits in the
+       label row instead of below the field, so all eight gaps in here are the
+       same 8px. */
+    [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {
+        gap: 8px !important;
     }
     /* The refresh spinner's slot, held open whether or not it is spinning (see
        the refresh_status container for the shift this prevents). 20px is the
@@ -1800,7 +1819,10 @@ st.markdown(
         align-items: flex-end;
     }
     [data-testid="stDownloadButton"] button {
-        height: 1.75rem !important;
+        /* 2rem, not the 1.75rem this was: at the shared 1rem label size the
+           text's own line box is 25.6px, which a 28px button clipped once its
+           2px of border is counted. */
+        height: 2rem !important;
         padding: 0 0.5rem !important;
         min-height: 0 !important;
     }
@@ -1868,8 +1890,14 @@ st.markdown(
     [data-testid="stDownloadButton"] button {
         min-width: fit-content !important;
     }
+    /* No font-size here on purpose: this label takes the shared 1rem from the
+       button rule below, like every other button in the app. The WEIGHT is
+       overridden back to normal: the other three buttons are the actions that
+       drive the flow (search, add, refresh), whereas this one only exports
+       what is already on screen, and at 600 it was competing with them.
+       (0,1,2) here beats the shared rule's (0,1,1). */
     [data-testid="stDownloadButton"] button p {
-        font-size: 0.75rem !important;
+        font-weight: 400 !important;
         white-space: nowrap;
     }
     /* Buttons live in narrow proportional columns (e.g. st.columns([1,1,9]));
@@ -1888,6 +1916,46 @@ st.markdown(
     }
     .stButton button p {
         white-space: nowrap;
+    }
+    /* ONE look for every labelled button in the app -- Search, Add Position,
+       Refresh Price & ATR and the CSV download. This replaces three
+       near-identical copies of the same palette (Search/Add here, the sidebar
+       Refresh button in its own block, and the download button's default
+       Streamlit grey), so the four can no longer drift apart.
+       Size: Streamlit labels buttons at 14px inside a button whose own
+       font-size is 16px, so every action in the app was labelled a step
+       SMALLER than the body text and the sidebar's inputs.
+       Palette: the sidebar's light blue, which was already on three of the
+       four; the CSV button's default grey was the odd one out.
+       Scoped to the two BaseButton variants that carry a text label. The
+       steppers, the sidebar collapse chevron and the title's help icon are all
+       untouched -- different testids, and their glyphs are SVG, not a <p>. */
+    [data-testid="stBaseButton-secondary"],
+    [data-testid="stBaseButton-primary"] {
+        background-color: #cfe8fc !important;
+        border-color: #a8d8f5 !important;
+        color: #0b3d5c !important;
+    }
+    [data-testid="stBaseButton-secondary"] p,
+    [data-testid="stBaseButton-primary"] p {
+        font-size: 1rem !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stBaseButton-secondary"]:hover:not(:disabled),
+    [data-testid="stBaseButton-primary"]:hover:not(:disabled) {
+        background-color: #b8ddf7 !important;
+        border-color: #8bc9ef !important;
+        color: #0b3d5c !important;
+    }
+    /* Every button, not just Add Position: these sit side by side, so a
+       disabled Search keeping the full-strength blue while a disabled Add
+       Position faded made two identically-dead buttons look like one live and
+       one dead. */
+    [data-testid="stBaseButton-secondary"]:disabled,
+    [data-testid="stBaseButton-primary"]:disabled {
+        background-color: #e8f3fb !important;
+        border-color: #d3e9f8 !important;
+        color: #7ba3bd !important;
     }
     /* Streamlit styles a stepper's hover and focus states with ONE declaration
        block (`:hover:enabled, :focus:enabled { color:#fff; background:#5DADE2 }`),
@@ -1911,63 +1979,125 @@ st.markdown(
         background-color: transparent !important;
         color: rgb(49, 51, 63) !important;
     }
-    /* Search / Add position: one shared width so the pair reads as a unit, and
-       the sidebar's light-blue primary palette so they don't fade into the page
-       (the default disabled style is nearly invisible). */
+    /* Search / Add position: one shared width so the pair reads as a unit.
+       Colour, weight and label size all come from the shared button rule
+       above -- this is the only thing that is theirs alone. */
     .st-key-search_btn button,
     .st-key-add_position_btn button {
         min-width: 9.5rem;
-        background-color: #cfe8fc !important;
-        border-color: #a8d8f5 !important;
-        color: #0b3d5c !important;
-        font-weight: 600 !important;
-    }
-    .st-key-search_btn button:hover:not(:disabled),
-    .st-key-add_position_btn button:hover:not(:disabled) {
-        background-color: #b8ddf7 !important;
-        border-color: #8bc9ef !important;
-        color: #0b3d5c !important;
-    }
-    /* Both buttons, not just Add Position: the pair sits side by side, so a
-       disabled Search keeping the full-strength blue while a disabled Add
-       Position faded made two identically-dead buttons look like one live and
-       one dead. */
-    .st-key-search_btn button:disabled,
-    .st-key-add_position_btn button:disabled {
-        background-color: #e8f3fb !important;
-        border-color: #d3e9f8 !important;
-        color: #7ba3bd !important;
     }
     /* A CONSTANT floor under the symbol-check block, so the Positions table
        holds its place instead of being shoved down whenever a result, warning
-       or confirmation appears. 72px is the MEASURED height of the green "found"
-       bar, the state that actually caused the shift: the block rested at 56px
-       empty and grew to 72px on a find, moving Positions down exactly 16px.
-       Sizing to it stabilises every shorter state too -- the one-line bars
-       (warning, "not found", the green added confirmation) measure 56px and now
-       render inside the floor rather than setting it. Re-measure if that bar's
-       typography changes; note it wraps to two lines at narrow widths, where
-       Positions does still move. The multi-match disambiguation panel is taller
-       again and is deliberately NOT covered: reserving its height would park
-       that much blank space under the form every moment there is no result.
+       or confirmation appears. 56px is MEASURED against the green "found" bar
+       as it renders with the halved padding set below: 50px for the one-line
+       bar, which is what every width from 1100px up produces, so the floor
+       clears it with 6px of slack and the bar renders inside the reservation
+       instead of setting it.
+       The two-line bar is 70px (measured at 950px and 850px, where the text
+       wraps) and therefore OVERRUNS this floor by 14px, shoving Positions down
+       at those widths. Deliberate, and the same trade the multi-match panel
+       gets below: a 70px floor would buy stillness at narrow widths by parking
+       20px of permanent blank space under the form at the widths actually used.
+       This was 72px, measured before that padding was halved -- which left ~18px
+       of permanent blank space under the form. Re-measure BOTH numbers together
+       if the bar's padding or typography changes again.
+       The multi-match disambiguation panel is taller again and is deliberately
+       NOT covered: reserving its height would park that much blank space under
+       the form every moment there is no result.
        Unconditional is the whole point -- reserving the height only while the
        block HAS content measured worse than reserving nothing at all, since a
        lookup passes through empty twice, so the space collapsed and sprang back
        mid-search. This never collapses. */
     .st-key-symbol_check_results {
-        min-height: 72px;
+        min-height: 56px;
+        /* This container is itself a flex column with Streamlit's 16px gap, and
+           it holds TWO children: the result bar plus a zero-height element
+           container that is always present. A zero-height sibling still earns
+           its gap, so the block measured bar + 16px and overshot the floor by
+           exactly that -- moving Positions down 10px on every find. Nothing is
+           ever visible between those two children, so the gap has no job here.
+           This is what lets the floor above be the bar's own height. */
+        gap: 0 !important;
         /* Streamlit's 16px flex gap between vertical siblings becomes 8px above
            and below this block: tightens Symbol row -> result bar and result
            bar -> Positions heading. Negative margin rather than a smaller
-           floor, because the 72px above is what stops Positions moving when a
+           floor, because the 56px above is what stops Positions moving when a
            result appears. Both values assume that 16px, which is Streamlit's
            theme gap -- an upgrade that changes it changes these gaps too. */
         margin-top: -8px;
         margin-bottom: -8px;
     }
-    /* st.caption defaults to small faded text; keep it a caption but readable. */
+    /* The result bar is a ONE-LINE confirmation, but Streamlit's alert padding
+       (1rem block) sizes it like a paragraph. Halved on the block axis, and the
+       inner <p> loses the margin Streamlit gives body copy. Scoped to this
+       container so the st.info onboarding hints elsewhere keep their roomier
+       padding -- they are real paragraphs. NOTE: the min-height above is the
+       anti-jump reservation for exactly this bar, so it was re-measured
+       against the shorter bar; changing this padding means re-measuring it. */
+    .st-key-symbol_check_results [data-testid="stAlert"],
+    .st-key-symbol_check_results [data-testid="stAlertContainer"] {
+        padding-top: 0.4rem !important;
+        padding-bottom: 0.4rem !important;
+    }
+    .st-key-symbol_check_results [data-testid="stAlert"] p {
+        margin-bottom: 0 !important;
+        line-height: 1.4 !important;
+    }
+    /* The OTHER half of that margin. Streamlit gives the alert's <p> a 1rem
+       bottom margin and then CANCELS it with -16px on the markdown container
+       wrapping it. Zeroing only the <p> above left that -16px uncompensated, so
+       the alert's content box computed 16px SHORTER than the text inside it.
+       At one line the alert's own padding absorbed the deficit and it looked
+       right; at two lines the shortfall outran that slack and the second line
+       rendered BELOW the green background -- visible once every text surface
+       went to 16px and moved the wrap point into ordinary window widths.
+       Both halves of the pair have to go, or neither. */
+    .st-key-symbol_check_results [data-testid="stAlert"] [data-testid="stMarkdownContainer"] {
+        margin-bottom: 0 !important;
+    }
+    /* Section headings ("Add position", "Positions") carry a 1rem top padding
+       on top of Streamlit's own 16px block gap, which double-spaces every
+       section break. The gap alone is enough separation. */
+    [data-testid="stMainBlockContainer"] h3 {
+        padding-top: 0 !important;
+        padding-bottom: 0.25rem !important;
+    }
+    /* ONE text size for the whole app, and this is it. Streamlit ships four
+       different sizes on surfaces that sit side by side: 16px body copy,
+       15.2px captions, 14px widget labels AND input values, and 13px grid
+       headers -- so the fields the user actually types into rendered a step
+       SMALLER than the prose explaining them, and two steps smaller than the
+       buttons next to them. Nothing about this app's content justifies four
+       sizes.
+       Everything non-bold is pinned to the 16px body size here. Hierarchy is
+       carried by weight and colour instead: the bold surfaces (the four
+       buttons, the sidebar's two driver inputs, the headings, the Position
+       Risk metric) keep their own larger sizes and are listed in the rules
+       that set them, not here.
+       stTextInputField / stNumberInputField are the innermost field elements
+       -- Streamlit declares the 14px directly on them, so an ancestor rule
+       does not reach it. */
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stTextInputField"],
+    [data-testid="stNumberInputField"],
+    [data-testid="stCaptionContainer"] p,
+    [data-baseweb="select"] div,
+    /* The selectbox shows its value in a plain <input> carrying only emotion
+       classes -- no testid, and not a div -- so neither of the rules above
+       reaches it. Asset Class was the last 14px field on the page. */
+    [data-testid="stSelectbox"] input,
+    /* The last two 14px surfaces: st.metric's label ("Position Risk") and the
+       radio options ("Hourly/Daily/Weekly"). Both are ordinary prose in a
+       stMarkdownContainer, so only their own wrappers distinguish them.
+       The sidebar's collapse chevron is deliberately not here -- its 24px is a
+       Material icon glyph rendered as a font ligature, not text, and pinning
+       it to 1rem would shrink the control rather than restyle a label. */
+    [data-testid="stMetricLabel"] p,
+    [data-testid="stRadioOption"] p {
+        font-size: 1rem !important;
+    }
+    /* st.caption keeps its faded colour; only the size was the odd one out. */
     [data-testid="stCaptionContainer"] p {
-        font-size: 0.95rem !important;
         color: #444 !important;
     }
     /* MAIN-area captions only (the subtitle under the title): full black. The
@@ -1990,6 +2120,88 @@ st.markdown(
         color: #2E86C1 !important;
         padding-top: 0 !important;
         padding-bottom: 0.25rem !important;
+        /* The app's single help "?" is the h1's own action element, so making
+           the heading a flex row is what lets it be pushed to the far right
+           edge; by default it sits inline, immediately after the title text. */
+        display: flex !important;
+        align-items: center !important;
+    }
+    [data-testid="stMainBlockContainer"] h1 [data-testid="stHeaderActionElements"] {
+        margin-left: auto;
+    }
+    /* Streamlit's help glyph already IS a ringed "?": its SVG is a stroked
+       <circle r="10"> plus the "?" arc and its dot. So this only scales it up
+       -- at Streamlit's 16px it reads as a footnote rather than as the app's
+       one help affordance. No border and no border-radius here on purpose: an
+       earlier version added `border: 2px solid` and drew a ring around the
+       ring.
+       #8e949f, not the lighter grey of the reference icon: a non-text control
+       needs ~3:1 against its background and this measures 3.1:1 on white,
+       where a #c8c8c8 ring measures 1.7:1 and disappears on a bright screen. */
+    [data-testid="stMainBlockContainer"] h1 [data-testid="stTooltipHoverTarget"] button {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        padding: 0 !important;
+        border: none !important;
+        background: none !important;
+        color: #8e949f;
+        transition: color 120ms;
+    }
+    [data-testid="stMainBlockContainer"] h1 [data-testid="stTooltipHoverTarget"] button:hover {
+        color: #2E86C1;
+    }
+    /* width/height are SVG *presentation attributes* (hard-coded 16), and CSS
+       beats those, so both need overriding here rather than in markup. `fill`
+       must stay none: the same precedence means a `fill: currentColor` here
+       overrides the element's own fill="none" and floods the ring solid grey
+       -- which is what this rule used to do. */
+    [data-testid="stMainBlockContainer"] h1 [data-testid="stTooltipHoverTarget"] button svg {
+        width: 26px !important;
+        height: 26px !important;
+        /* !important on stroke too: Streamlit's own emotion rule for this svg
+           sets stroke: rgba(49,51,63,.6) and wins on specificity otherwise, so
+           the icon ignored `color` above and never turned blue on hover. */
+        stroke: currentColor !important;
+        fill: none !important;
+    }
+    /* The consolidated help panel measures ~513px tall, and Streamlit caps
+       tooltips at max-height: 300px with overflow-y: auto -- so 42% of it sat
+       behind an internal scrollbar, which defeats the point of gathering all
+       the help into one hover. Viewport-relative so it can never be taller
+       than the screen; on a short window it correctly scrolls again. Global on
+       purpose: every other tooltip left in this app is one line, so a ceiling
+       they never reach cannot affect them. */
+    [data-testid="stTooltipContent"] {
+        max-height: min(78vh, 620px) !important;
+        /* Streamlit's own rule is a flat `max-width: 672px` with no viewport
+           term, so on a window narrower than that the panel keeps its 672px
+           and simply runs off the right edge -- the last words of every line
+           unreachable, with no horizontal scrollbar to get at them (the
+           element's overflow is `auto`, but the clipping happens outside it,
+           at the window). Harmless while every tooltip was one short line;
+           this one is eight lines of prose and hit it immediately.
+           min(), so the 672px ceiling still governs on a wide screen and this
+           only ever shrinks the panel. 2rem of slack rather than 1rem because
+           100vw counts the vertical scrollbar's width while the panel's
+           containing block does not. */
+        max-width: min(672px, calc(100vw - 2rem)) !important;
+        /* Close the moment the pointer leaves the "?" itself. BaseWeb keeps a
+           tooltip open while the pointer is over the tooltip BODY too, which is
+           right for a one-line hint you might want to select, and wrong here:
+           this panel is 672x476 and opens directly beneath the icon, so the
+           natural move from the icon back to the page goes straight THROUGH
+           it and the panel appears stuck open. Measured: leaving the icon
+           upward (missing the panel) closes it immediately; leaving it
+           downward (into the panel) does not.
+           pointer-events: none makes the panel transparent to the mouse, so
+           there is no mouseenter to cancel the icon's mouseleave and no path
+           that keeps it alive. The cost is that the panel can no longer be
+           scrolled or text-selected with the mouse -- it only ever scrolls on
+           a window shorter than ~610px, where the max-height above bites. */
+        pointer-events: none !important;
     }
     /* st.toast stacks fixed at the top-RIGHT corner (right:0, under the Deploy
        toolbar); pin the stack to the left edge instead. */
@@ -2009,10 +2221,12 @@ st.markdown(
 st.markdown(
     """
     <style>
+    /* Size and weight for these two come from the sidebar block further down,
+       which at (0,2,0) outranks this selector's (0,1,1) -- the 1.1rem/600 that
+       used to sit here never applied and has been removed rather than left to
+       read as the authority on it. Padding is this rule's alone. */
     input[aria-label="Portfolio Size ($)"],
     input[aria-label="Risk (%)"] {
-        font-size: 1.1rem !important;
-        font-weight: 600 !important;
         padding: 2px 8px !important;
     }
     div[data-testid="stTextInputRootElement"]:has(input[aria-label="Portfolio Size ($)"]),
@@ -2033,19 +2247,20 @@ st.markdown(
     [data-testid="stElementContainer"]:has(input[aria-label="Risk (%)"]) {
         position: relative;
     }
-    /* Portfolio Size sits 32px above the next label but Risk (%) only 16px, and
-       the focus hint below needs ~23px (5px offset + 17.92px line box) -- so the
-       hint overlapped the "ATR Timeframe" label by 6.9px while Portfolio's had
-       9.1px to spare. Margin, not padding: padding would grow the containing
-       block that the hint's `top: 100%` resolves against, moving the hint down
-       with it and reserving nothing. Evens both gaps to 32px. */
-    [data-testid="stElementContainer"]:has(input[aria-label="Risk (%)"]) {
-        margin-bottom: 16px;
-    }
-    /* Streamlit only renders its native commit hint when the widget is wider
-       than ~180px; these inputs are 164px in the pinned 206px sidebar, so the
-       element is never created (not merely hidden) and has to be recreated
-       here. Shown while the field has focus, sitting in the natural 1rem gap
+    /* No bottom reservation on these two fields any more, which is what lets
+       them take the same 8px gap as everything else in the panel. The focus
+       hint used to hang BELOW the field, so ~23px had to be reserved under
+       each one (a 16px margin plus the gap) whether or not anyone was typing.
+       The hint sits in the label row now -- see its rule below -- so it costs
+       no vertical space at all. */
+    /* Streamlit only renders its native commit hint on a wide enough widget;
+       at 184px in the pinned 236px sidebar these inputs are still under
+       whatever that threshold really is, so the element is never created (not
+       merely hidden) and has to be recreated here. The width was 164px when
+       this was written and the threshold was noted as "~180px" -- 184px
+       produces no hint either, so treat that figure as a lower bound, not a
+       measurement, and re-check by looking for InputInstructions in the
+       sidebar if these fields are ever widened again. Shown while the field has focus, sitting in the natural 1rem gap
        below the field -- do NOT reintroduce a negative margin-bottom on these
        containers: -14px once collapsed that gap and the hint landed on top of
        the next widget's label. Anchored by `top`, not `bottom: -15px`: the
@@ -2062,11 +2277,26 @@ st.markdown(
        input's accessible description). */
     [data-testid="stElementContainer"]:has(input[aria-label="Portfolio Size ($)"]):focus-within::after,
     [data-testid="stElementContainer"]:has(input[aria-label="Risk (%)"]):focus-within::after {
-        content: "Auto-applies as you pause";
+        /* "Auto-applies", not "Auto-applies as you pause": the full sentence
+           does not fit beside the longer of the two labels in the row this
+           now sits on. The behaviour it names is spelled out in the title's
+           help panel under "Settings apply instantly" -- this is the
+           at-the-field reminder, not the explanation. */
+        content: "Auto-applies";
         position: absolute;
-        left: 2px;
-        top: calc(100% + 5px);
-        font-size: 0.7rem;
+        /* Pinned to the LABEL ROW (top: 0, right-aligned into the width the
+           label leaves) rather than hanging under the field at
+           `top: calc(100% + 5px)`. Anchored below, it forced every gap under
+           these two fields to reserve ~23px PERMANENTLY to host a hint that
+           only appears while the field has focus -- dead space either side of
+           Risk (%) at all times. Up here it overlaps nothing and reserves
+           nothing, so the whole sidebar keeps one 8px rhythm.
+           right/left rather than a width: the box shrink-wraps its text, so it
+           stays clear of the label's own start. */
+        right: 0;
+        top: 0;
+        line-height: 1.2;
+        font-size: 0.65rem;
         /* Both values track the SIDEBAR background, not the field: the chip
            hangs below the input (top: calc(100% + 5px)) onto the panel behind
            it. It was rgb(240,242,246) on #808495 text, left over from when the
@@ -2085,12 +2315,6 @@ st.markdown(
     input[aria-label="Symbol, Name"]::placeholder {
         color: #595e6b !important;
         opacity: 1 !important;
-    }
-    /* The auto-commit helper below is a 0px components.html iframe; its wrapper
-       still occupies a sidebar gap slot unless removed from layout entirely.
-       display:none iframes still load and run their script. */
-    [data-testid="stSidebar"] [data-testid="stElementContainer"]:has(iframe[height="0"]) {
-        display: none !important;
     }
     </style>
     """,
@@ -2363,23 +2587,67 @@ if st.session_state.get("load_error"):
     # Escaped because the message quotes repr()s of whatever was in the file.
     st.error(_md_escape(st.session_state.load_error))
 
-st.title(
-    "Position Size Calculator",
-    help=(
-        "**How it works**\n"
-        "- **ATR (Average True Range, 14-period)** — TradingView's average of each "
-        "bar's true trading range on the selected timeframe: Hourly, Daily, and "
-        "Weekly measure typical hour-, day-, or week-sized moves.\n"
-        "- **Stop distance** = ATR × ATR multiple; stop price = entry − stop distance.\n"
-        "- **Position size** is set so a stop-out loses exactly your Risk % of the "
-        "portfolio, then split across # Tranches.\n"
-        "- **Live data** — price & ATR are pulled from TradingView when a position "
-        "is added and on every refresh.\n"
-        "- **Global settings apply instantly** — Portfolio Size and Risk (%) "
-        "re-compute every saved position on the spot; switching the ATR timeframe "
-        "automatically re-pulls live price & ATR for all saved positions."
-    ),
+# Every explanation in the app, in one place. This replaced nine per-field "?"
+# tooltips plus a shorter version of this text, which had the same facts written
+# two and three times over -- stop distance was on the title AND on ATR
+# multiple, the timeframe re-fetch on the title AND on ATR Timeframe,
+# Portfolio Size × Risk % on the title AND on Position Risk. Merged here, not
+# concatenated.
+#
+# One surface renders this string -- the "?" beside the title -- which is the
+# point of the consolidation: nothing to keep in step with anything else.
+#
+# Known limit, measured rather than assumed. Streamlit renders the icon as a
+# <span data-testid="stTooltipHoverTarget"> carrying tabindex="-1", and opens
+# the panel on pointer hover only: focusing the span and pressing Enter both
+# open nothing (verified in the browser). So it is not a silent stop in the tab
+# order -- Streamlit keeps it out of the order entirely -- but the help text has
+# no keyboard or screen-reader path at all. `help=` hands over no hook to change
+# that markup, so closing the gap needs a SECOND, keyboard-reachable surface
+# (an expander, or st.popover), which is a design decision about the one-tooltip
+# rule and not a rewording of this comment.
+HELP_BODY = (
+    "- **ATR (Average True Range, 14-period)** — TradingView's average of each "
+    "bar's true trading range on the selected timeframe. Hourly, Daily and "
+    "Weekly measure typical hour-, day-, or week-sized moves.\n"
+    "- **ATR multiple** — how many ATRs below entry the stop goes. Bigger = a "
+    "wider stop and a smaller position for the same risk.\n"
+    "- **Stop distance** = ATR × ATR multiple. Stop price = entry − stop distance.\n"
+    "- **Position Risk** — the dollar amount you lose if one trade hits its stop, "
+    "and no more. Portfolio Size × Risk %.\n"
+    "- **Position size** — set so a stop-out loses exactly your Position Risk, "
+    "then split across # Tranches.\n"
+    "- **Tranche** — one of the equal entries a position is split into. Tranche "
+    "size = position size ÷ # Tranches.\n"
+    "- **Asset Class** — limits the symbol search to one class. Pick All to "
+    "detect it automatically.\n"
+    "\n"
+    "**Example**\n"
+    # Every "$" below is escaped. Streamlit's markdown treats $...$ as inline
+    # math, so the five plain dollar signs this line used to carry were PAIRED
+    # off (1st-2nd, 3rd-4th) and rendered as two green monospace code spans --
+    # which also swallowed the "$" of "$4.00" and "$833", so the example quietly
+    # showed the wrong amounts. Escaped, they are literal and the whole line
+    # renders as ordinary body text at body size instead of shrunken code.
+    "\\$10,000 portfolio · 1% risk · Weekly ATR 2.00 · ATR multiple 2 → stop "
+    "distance \\$4.00 → position size \\$2,500 → 3 tranches of \\$833 each. "
+    "A stop-out costs you \\$100.\n"
+    "\n"
+    "**Adding a position**\n"
+    "Type a ticker or a company/coin name and press Enter (or click Search) to "
+    "verify it live on TradingView. The exchange is picked automatically — "
+    "biggest venues first — within the selected Asset Class.\n"
+    "\n"
+    "**Live data**\n"
+    "Price & ATR are pulled from TradingView when a position is added and on "
+    "every refresh. The table shows the last refresh, not a live feed.\n"
+    "\n"
+    "**Settings apply instantly**\n"
+    "Portfolio Size and Risk (%) re-compute every saved position about a second "
+    "after you stop typing — no need to press Enter."
 )
+
+st.title("Position Size Calculator", help=HELP_BODY)
 st.caption(
     "Auto-calculated ATR sets your stop price and position size — capping your "
     "loss on any trade at the risk % you set."
@@ -2477,6 +2745,7 @@ def _on_timeframe_change() -> None:
     # screen until a manual click -- the same auto-apply rule the editable
     # fields follow.
     save_state()
+    _clear_grid_selection()
     if st.session_state.positions:
         st.session_state.refreshing = True
 
@@ -2486,7 +2755,12 @@ with st.sidebar:
     # number_input render their value at 22.4px/600, while st.metric renders at
     # 36px/400 — same kind of "a dollar amount" content, three different looks.
     # Pin the inputs to one shared size/weight; Position Risk stays the biggest
-    # number in the sidebar since it's the headline takeaway of this section.
+    # number in the sidebar since it's the headline takeaway of this section --
+    # but only just. At 26px it was the largest text anywhere in the sidebar,
+    # outranking the "Global settings" heading above it, which made a derived
+    # read-only figure look more important than the two inputs that determine
+    # it. 20px is the heading's own size: still a clear step up from the 16px
+    # inputs, with nothing in the sidebar above the heading.
     st.markdown(
         """
         <style>
@@ -2496,27 +2770,16 @@ with st.sidebar:
             font-weight: 600 !important;
         }
         [data-testid="stSidebar"] [data-testid="stMetricValue"] {
-            font-size: 26px !important;
+            font-size: 20px !important;
             font-weight: 600 !important;
         }
+        /* Colour, weight and label size come from the shared button rule in
+           the main style block. All that is left here is the width pin, which
+           gives this button a right edge shared with the two inputs above --
+           it was content-sized once, which is what made it 11px narrower than
+           the fields. */
         [data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
-            background-color: #cfe8fc !important;
-            border-color: #a8d8f5 !important;
-            color: #0b3d5c !important;
-            /* Pinned to the same width as the inputs above so all three share a
-               right edge. Was content-sized, which is what made it 11px
-               narrower than the fields. */
             width: var(--pf-control-w) !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover:not(:disabled) {
-            background-color: #b8ddf7 !important;
-            border-color: #8bc9ef !important;
-            color: #0b3d5c !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:disabled {
-            background-color: #e8f3fb !important;
-            border-color: #d3e9f8 !important;
-            color: #7ba3bd !important;
         }
         </style>
         """,
@@ -2526,8 +2789,6 @@ with st.sidebar:
     # used instead and reformatted with commas on every change.
     st.text_input(
         "Portfolio Size ($)", key="portfolio_size_text", on_change=_sync_portfolio_size,
-        help="Total capital allocated to this strategy. Edits auto-apply ~1.5s "
-             "after you stop typing — or press Enter.",
     )
     # Auto-apply edited values after the user pauses typing, without requiring
     # Enter, on the two fields that edit committed data: Portfolio Size and
@@ -2545,8 +2806,8 @@ with st.sidebar:
     # the first commit. A synthetic Enter keydown/keypress goes through
     # Streamlit's own commit path (same as the user pressing Enter), so each
     # widget's on_change logic runs unchanged. Skipped if the field already
-    # lost focus -- blur commits natively. The iframe is removed from layout by
-    # the iframe[height="0"] CSS rule above. Grid cell edits get the same rule
+    # lost focus -- blur commits natively. The iframe removes its own wrapper
+    # from layout (see the top of the script). Grid cell edits get the same rule
     # via onCellEditingStarted on the AgGrid below -- this listener can't see
     # into the grid's iframe.
     _AUTO_COMMIT_LABELS = ("Portfolio Size ($)", "Risk (%)")
@@ -2556,6 +2817,27 @@ with st.sidebar:
         try {
             const W = window.parent;
             const FIELDS = "__FIELDS__";
+
+            // Hide this helper's own wrapper -- same self-identifying pattern as
+            // the disconnect-dialog helper further down, and for the same reason:
+            // a zero-height iframe still leaves an stElementContainer that is a
+            // full flex item, so it earns the sidebar gap on BOTH sides and cost
+            // a measured 2 gaps of dead space between Portfolio Size and Risk (%).
+            // This was meant to be a CSS rule keyed on iframe[height="0"], but
+            // Streamlit 1.62 sizes the iframe with inline CSS and sets no height
+            // ATTRIBUTE at all (measured: getAttribute("height") === null), so
+            // that rule matched nothing and both gaps were being paid in full.
+            // Matching on contentWindow identity instead cannot go stale the way
+            // a testid or attribute selector can, and it touches only this
+            // iframe -- a future VISIBLE iframe in the sidebar is unaffected.
+            // Hiding it does not stop this script: it has already run, and the
+            // listener below is installed on the PARENT document, not in here.
+            for (const f of W.document.querySelectorAll("iframe")) {
+                if (f.contentWindow !== window) continue;
+                const slot = f.closest('[data-testid="stElementContainer"]');
+                if (slot) slot.style.display = "none";
+                break;
+            }
             if (W.__pfCommitHandler) {
                 W.document.removeEventListener("input", W.__pfCommitHandler, true);
             }
@@ -2592,113 +2874,51 @@ with st.sidebar:
         ),
         height=0,
     )
-    # Take the "?" icons out of the keyboard tab order. Streamlit renders each
-    # one as a real <button>, so every explained control contributed TWO stops
-    # and tabbing walked "? field ? field ..." -- 10 of this page's 21 stops
-    # were help icons, i.e. half of every Tab press went nowhere useful.
-    # Must be JS: tabindex is an attribute, and CSS cannot set it. Same
-    # parent-reaching iframe as the auto-commit listener above, for the same
-    # reason (st.markdown never runs <script>).
-    # A MutationObserver, not a one-off sweep: a rerun remounts widgets and each
-    # fresh "?" would arrive focusable again. It watches childList/subtree and
-    # deliberately NOT attributes -- observing attributes would make the
-    # setAttribute below retrigger this callback forever. Debounced through one
-    # frame, and the :not() in the selector makes an already-stamped page cost a
-    # failed match instead of a re-walk, since Streamlit mutates constantly.
-    # Costs assistive tech nothing measurable: Streamlit gives the icon no
-    # aria-haspopup, no aria-expanded, no text and never points the field's
-    # aria-describedby at the tooltip (all four verified null live), so the stop
-    # announced "Help for X, button" and carried no help text. Attaching that
-    # text to the fields properly is a separate, better fix.
-    components.html(
-        """
-        <script>
-        try {
-            const W = window.parent;
-            // The hover target alone is NOT the discriminator: Streamlit wraps
-            // every tooltip'd control in one, so "stTooltipHoverTarget button"
-            // also matches Search, Add Position and CSV -- stamping those
-            // deleted three real controls from the tab order (caught in test).
-            // A help icon is the child with NO data-testid (every real
-            // Streamlit button carries stBaseButton-*) whose aria-label starts
-            // "Help" -- "Help for <field>" for widgets, plain "Help" for the
-            // st.markdown("", help=...) icons. Two independent guards, both
-            // failing safe: if either marker changes the icons simply become
-            // focusable again, rather than real buttons going unreachable.
-            const HELP = '[data-testid="stTooltipHoverTarget"] button[aria-label^="Help"]:not([data-testid])';
-            const SEL = HELP + ':not([tabindex="-1"])';
-            if (W.__pfHelpSkipObserver) W.__pfHelpSkipObserver.disconnect();
-            let queued = false;
-            const sweep = function () {
-                queued = false;
-                for (const b of W.document.querySelectorAll(SEL)) {
-                    b.setAttribute("tabindex", "-1");
-                }
-            };
-            W.__pfHelpSkipObserver = new W.MutationObserver(function () {
-                if (queued) return;
-                queued = true;
-                W.requestAnimationFrame(sweep);
-            });
-            W.__pfHelpSkipObserver.observe(W.document.body, {childList: true, subtree: true});
-            sweep();
-            // The sidebar renders before the page, so an empty first sweep is
-            // normal -- but still empty seconds later means the markers moved
-            // and this silently does nothing. Say so rather than pass quietly.
-            W.setTimeout(function () {
-                if (!W.document.querySelector(HELP)) {
-                    console.warn("[help-skip] no help icons matched " + HELP);
-                }
-            }, 3000);
-        } catch (e) {
-            // Invisible iframe: without this, a failed install (blocked parent
-            // access, renamed testid) would leave the tab order silently wrong.
-            console.error("[help-skip] install failed", e);
-        }
-        </script>
-        """,
-        height=0,
-    )
     st.number_input(
         "Risk (%)", min_value=0.0, max_value=100.0, step=0.1, format="%.2f",
         key="risk_pct", on_change=_sync_risk_pct,
-        help="% of portfolio you're willing to lose if the stop is hit. Edits "
-             "auto-apply ~1.5s after you stop typing — or press Enter.",
     )
+    # Directly under Risk (%), not at the foot of the sidebar: this is the
+    # product of Portfolio Size x Risk (%) and nothing else, so it belongs
+    # beside its two inputs where a changed percentage can be read straight
+    # off it -- it used to sit below the refresh controls, five elements away
+    # from the field that drives it.
+    r_dollars_preview = st.session_state.portfolio_size * (st.session_state.risk_pct / 100.0)
+    # _fmt_money, not ",.0f": at $50 x 1.8% the metric showed $1 for a true
+    # $0.90 -- an 11% overstatement in the one number the whole tool exists to
+    # control (UX review).
+    # Reads session_state, not this widget's return value, so moving it above
+    # the rest of the sidebar cannot change what it shows.
+    st.metric("Position Risk", f"${_fmt_money(r_dollars_preview)}")
     st.radio(
         "ATR Timeframe", options=list(TIMEFRAME_OPTIONS.keys()),
         key="timeframe_label", on_change=_on_timeframe_change,
-        help="Which TradingView interval ATR is pulled from. Switching this "
-             "automatically refreshes price & ATR for all saved positions.",
     )
-    # The help lives on a "?" icon beside the button, not on the button itself.
-    # st.button's own help= turns the WHOLE button into a hover target, so the
-    # tooltip ambushed anyone on their way to clicking it; every other control
-    # on the page explains itself through a "?" the reader chooses to hover.
-    # It sits above the button, on its own line, exactly where every other
-    # control in this sidebar puts its "?" -- in the label row, not on the
-    # control. Empty body on purpose: with help=, st.markdown renders the icon
-    # and nothing else, so the icon is the only hover target.
-    # Streamlit 1.62: a button inside st.container(horizontal=True) gets a
-    # native title=, duplicating its own label in an OS tooltip. Keep it out of
-    # one.
-    with st.container(key="refresh_help"):
-        st.markdown("", help=(
-            "Refreshing..." if st.session_state.get("refreshing")
-            else "Add a position first" if not st.session_state.positions
-            else f"Re-fetch the live price and {st.session_state.timeframe_label} ATR for every saved "
-                 "position from TradingView, and recalculate their sizing. Prices in the table are "
-                 "from the last refresh, not a live feed."
-        ))
+    # Visible, not tooltip content: a consequence, not vocabulary. One click
+    # re-pulls price & ATR for every saved position, and that is needed with a
+    # hand on the control -- months later, with 20 positions loaded -- not in a
+    # reference panel read once on day one.
+    st.caption("Switching this re-fetches price & ATR for all saved positions.")
     if st.button(
         "🔄 Refresh Price & ATR",
         type="primary",
         disabled=not st.session_state.positions or st.session_state.get("refreshing", False),
+        # Disabled-state reason only, which is why it can live on the button now:
+        # the "ambush on the way to clicking" that once pushed this onto its own
+        # "?" icon was a property of the documentation that used to be here (now
+        # in the title's help), and a hint shown only while the control is dead
+        # cannot ambush a click. Same shape as Search and Add Position.
+        help=(
+            "Refreshing..." if st.session_state.get("refreshing")
+            else "Add a position first" if not st.session_state.positions
+            else None
+        ),
     ):
         # Two-step (request -> rerun -> execute) so the button actually renders
         # disabled while the refresh runs, instead of only disabling on the
         # NEXT click after the work already finished in this same script run.
         st.session_state.refreshing = True
+        _clear_grid_selection()
         st.rerun()
 
     # A CONSTANT slot for the refresh spinner. st.spinner inserts a 20px element
@@ -2724,7 +2944,7 @@ with st.sidebar:
             st.session_state.refreshing = False
             st.rerun()
     if st.session_state.get("last_refreshed_at"):
-        # Two-space markdown line break: in the 206px sidebar the one-line form
+        # Two-space markdown line break: in the 236px sidebar the one-line form
         # wraps mid-date ("2026-\n09-02"); breaking before the date keeps the
         # timestamp intact on its own line.
         st.caption(
@@ -2742,16 +2962,6 @@ with st.sidebar:
             f"Data refreshed as of {html.escape(str(st.session_state.last_refreshed_at))}</span>",
             unsafe_allow_html=True,
         )
-
-    r_dollars_preview = st.session_state.portfolio_size * (st.session_state.risk_pct / 100.0)
-    # _fmt_money, not ",.0f": at $50 x 1.8% the metric showed $1 for a true
-    # $0.90 -- an 11% overstatement in the one number the whole tool exists to
-    # control (UX review).
-    st.metric(
-        "Position Risk", f"${_fmt_money(r_dollars_preview)}",
-        help="The dollar amount you lose if one trade hits its stop — no more. "
-             "Simply Portfolio Size × Risk %.",
-    )
 
 # ── Add position ─────────────────────────────────────────────────────────────
 st.subheader("Add position")
@@ -2778,17 +2988,12 @@ c1, c2, c3, c4, search_col, add_col = st.columns(
     [1.5, 1.0, 1.3, 1.3, 1.9, 1.9], gap="small", vertical_alignment="bottom"
 )
 symbol = c1.text_input(
-    "Symbol, Name", placeholder="HYPEUSDT, AAPL, Apple, XAUUSD...", key=_symbol_key(),
+    "Symbol, Name", placeholder="HYPE, HYPEUSDT, AAPL, Apple...", key=_symbol_key(),
     on_change=check_symbol,
-    help="Type a ticker or a company/coin name and press Enter to verify it live on "
-         "TradingView. The exchange is picked automatically — biggest venues "
-         "first — within the selected Asset Class.",
 )
 c2.selectbox(
     "Asset Class", options=["All"] + ASSET_CLASSES, index=1, key="add_asset_class_pick",
     on_change=check_symbol,
-    help="Limits the symbol search to this class. Pick All to detect it "
-         "automatically.",
 )
 atr_multiple = c3.number_input(
     # Both bounds exist for accessibility, not to constrain trading: see
@@ -2800,14 +3005,10 @@ atr_multiple = c3.number_input(
     "ATR multiple", min_value=ATR_MULTIPLE_MIN, max_value=100.0, value=1.5,
     step=ATR_MULTIPLE_STEP, format="%.1f", key="add_atr_multiple",
     on_change=reset_symbol_check,
-    help="How many ATRs below entry the stop goes: stop distance = ATR × this. "
-         "Bigger = wider stop and a smaller position for the same risk.",
 )
 tranches = c4.number_input(
     "# Tranches", min_value=1, value=3, step=1, key="add_tranches",
     on_change=reset_symbol_check,
-    help="How many equal entries the position is split into — tranche size = "
-         "position size ÷ this.",
 )
 
 clean_symbol = symbol.strip().upper()
@@ -2832,33 +3033,184 @@ if search_col.button(
     "🔍 Search", key="search_btn", width="stretch",
     # Complementary to pressing Enter in the Symbol field, not a replacement --
     # useful for re-checking an already-committed symbol (e.g. after ATR
-    # multiple/tranches reset the check) without retyping it. Disabling on the
-    # committed value is safe even though it lags what is visibly typed:
-    # clicking the button blurs the Symbol field, which commits it and fires
-    # check_symbol() through on_change, so an edited symbol still gets searched.
+    # multiple/tranches reset the check) without retyping it.
+    # This gate is only HALF the answer, and it is the half that lags. Every
+    # value here is server-side, and `clean_symbol` is the text_input's
+    # COMMITTED value -- Streamlit has no other, since session_state carries
+    # the last committed value too and in-flight keystrokes never leave the
+    # browser until Enter or blur triggers a rerun. So on its own this greys
+    # the button out for exactly the person who has just typed a symbol and not
+    # pressed Enter yet, and the click that would have committed it cannot land
+    # on a disabled button -- the reason it must stay disabled on an empty
+    # field AND go live the moment one is typed is unreachable from here.
+    # The browser closes that gap: the gate script below re-derives this same
+    # condition against what is actually in the field, on every keystroke,
+    # from the verdict published on `symbol_check_results`. What is left here
+    # is the state each rerun lands in, which is correct on its own because a
+    # rerun is precisely when the committed value and the field agree.
     disabled=searching or already_found or not clean_symbol or not _portfolio_size_set(),
+    # Only reasons that do NOT depend on the Symbol field's contents survive
+    # here. `help` is React-owned tooltip CONTENT rather than an attribute, so
+    # the gate script below cannot keep it honest the way it keeps `disabled`
+    # honest -- which makes every field-dependent string wrong at exactly the
+    # moment it is read. "Enter a symbol or name first" was appearing over a
+    # field with `sol` typed into it, and "Already verified" over a field since
+    # edited to a different symbol. Both are gone rather than reworded: no
+    # single string is true for both an enabled and a disabled button, and
+    # neither state needs one. An empty field sits in plain view next to the
+    # greyed-out button, and the verified state prints its own result banner
+    # directly below it.
     help=(
         "Checking..." if searching
-        else "Already verified — edit the symbol to search again" if already_found
-        # Ranked above the empty-symbol hint: typing a symbol would not make the
-        # button work, so naming the symbol first would send the user down a
-        # path that still dead-ends.
         else _NO_PORTFOLIO_HINT if not _portfolio_size_set()
-        else "Enter a symbol or name first" if not clean_symbol
         else None
     ),
 ):
-    check_symbol()
+    if clean_symbol:
+        check_symbol()
+    else:
+        # Not routed through check_symbol()'s own empty-symbol branch: that
+        # branch is also the Symbol field's on_change, where an empty value
+        # means "the user just cleared the field" and a toast would be noise.
+        # Here it can only mean a deliberate press with nothing to search.
+        queue_toast("Enter a symbol or name first.", "⚠️")
     st.rerun()
+
+# Keep both symbol buttons -- Search and Add Position -- in step with what is
+# actually TYPED in the Symbol field, which the server never sees: Streamlit
+# commits a text_input only on Enter or blur, so every disabled= around here is
+# computed from the last committed value and cannot react to a symbol being
+# typed or cleared. Left alone that is a bug in both directions. Search was
+# wrong the harmless way -- a freshly typed symbol left it greyed out, and the
+# click that would have committed the symbol cannot land on a disabled button.
+# Add Position is wrong the dangerous way: it stays enabled over a stale match
+# (see the comment on it in sync() below).
+# Stateless by design: it recomputes the FULL condition on every keystroke from
+# the verdict the server publishes on symbol_check_results, rather than
+# remembering whether it was the one that disabled the button. So it can never
+# drift out of step with the server, and it can never enable a button the
+# server disabled for a reason of its own (no portfolio size, a lookup already
+# running) -- those arrive as gate="no" and win here too.
+# Same iframe pattern, and for the same reasons, as the sidebar's auto-commit
+# helper: st.markdown never executes <script> (it sets innerHTML), and the
+# listener is delegated on the parent document because a rerun can remount the
+# input and orphan a direct listener. It does NOT commit anything -- the Symbol
+# field is deliberately excluded from auto-commit, since committing it fires a
+# live TradingView search and a mid-typing pause would search half-typed
+# tickers.
+components.html(
+    """
+    <script>
+    try {
+        const W = window.parent;
+        // Hide this helper's own layout slot -- a zero-height iframe still
+        // leaves an stElementContainer that is a full flex item and earns a row
+        // gap. Matched on contentWindow identity, which cannot go stale the way
+        // a testid can, and which touches only this iframe.
+        for (const f of W.document.querySelectorAll("iframe")) {
+            if (f.contentWindow !== window) continue;
+            const slot = f.closest('[data-testid="stElementContainer"]');
+            if (slot) slot.style.display = "none";
+            break;
+        }
+        const SYMBOL = "input[aria-label='Symbol, Name']";
+        const sync = function () {
+            const inp = W.document.querySelector(SYMBOL);
+            const btn = W.document.querySelector(".st-key-search_btn button");
+            const gate = W.document.querySelector("[data-search-gate]");
+            if (!inp || !btn || !gate) return;
+            const typed = inp.value.trim().toUpperCase();
+            // Mirrors the server's own expression, term for term: its
+            // `searching or not _portfolio_size_set()` arrives as the gate, its
+            // `already_found` as data-search-found, and its `not clean_symbol`
+            // is re-tested here against the live field instead of the committed
+            // one. Comparing against the found symbol is what re-opens the
+            // button the moment a verified symbol is edited into a new one,
+            // rather than only after a commit.
+            btn.disabled = gate.dataset.searchGate !== "ok"
+                || !typed
+                || typed === gate.dataset.searchFound;
+            // Add Position needs the same treatment for the opposite reason.
+            // The server enables it once a symbol is verified, and binds the
+            // match to the click at RENDER time (on_click=..., args=(match,)).
+            // Type over a verified symbol without committing and the server
+            // sees nothing: the button stays enabled, still carrying the OLD
+            // match, so a click adds a position for a symbol the field no
+            // longer shows. Requiring the live field to still read as the
+            // verified symbol closes that window; the server's own verdict is
+            // ANDed in, so this can only ever disable, never enable.
+            const add = W.document.querySelector(".st-key-add_position_btn button");
+            if (add) {
+                add.disabled = gate.dataset.addReady !== "ok"
+                    || typed !== gate.dataset.searchFound;
+            }
+        };
+        if (W.__pfSearchGate) {
+            W.document.removeEventListener("input", W.__pfSearchGate, true);
+        }
+        W.__pfSearchGate = function (e) {
+            if (e.target && e.target.matches && e.target.matches(SYMBOL)) sync();
+        };
+        W.document.addEventListener("input", W.__pfSearchGate, true);
+        // Keystrokes are not the only thing that can put the button out of
+        // step -- a rerun can too, and in a way that is easy to miss.
+        // Streamlit renders through React, which writes an attribute only when
+        // its OWN previous value for it changed. Once this script has written
+        // `disabled` straight to the DOM, React's copy no longer matches the
+        // DOM, and any later render that arrives at the same value React
+        // already believed is skipped -- leaving this script's stale value in
+        // place. Measured: after a search committed from a typed symbol, the
+        // server correctly re-rendered the button as disabled ("already
+        // verified") and the DOM stayed enabled.
+        // Re-deriving on mutations fixes it from either direction, and cannot
+        // loop: sync() only ever assigns, and assigning a value a property
+        // already holds mutates nothing, so the observer goes quiet by itself.
+        // Filtered to the three attributes that can change the answer, so a
+        // rerun's ordinary DOM churn does not wake it (the grid is in its own
+        // iframe and never reaches this document).
+        if (W.__pfSearchGateObs) W.__pfSearchGateObs.disconnect();
+        W.__pfSearchGateObs = new W.MutationObserver(function () {
+            clearTimeout(W.__pfSearchGateTimer);
+            W.__pfSearchGateTimer = setTimeout(sync, 0);
+        });
+        W.__pfSearchGateObs.observe(W.document.body, {
+            subtree: true, childList: true, attributes: true,
+            attributeFilter: [
+                "disabled", "data-search-gate", "data-search-found", "data-add-ready",
+            ],
+        });
+        // Once on install: normally a no-op, since a rerun is the one moment
+        // the field and the committed value agree. It matters when Streamlit
+        // restores a typed-but-uncommitted value into a remounted input, where
+        // no input event ever fires.
+        sync();
+    } catch (e) {
+        // This iframe is invisible (height 0), so without this an install
+        // failure -- a renamed label, blocked parent access -- would take the
+        // feature down with no signal anywhere, not even the console.
+        console.error("[search-gate] install failed", e);
+    }
+    </script>
+    """,
+    height=0,
+)
+
 
 # Everything the symbol check renders (spinner, warnings, match panel) lands
 # inside this container.
 with st.container(key="symbol_check_results"):
     # Streamlit deletes an EMPTY container from the DOM outright, and a
-    # min-height reserves nothing on an element that isn't there. This
-    # zero-height child keeps it mounted so the reservation above holds in the
-    # empty state too -- which is the state it exists for.
-    st.html("<div style='height:0'></div>")
+    # min-height reserves nothing on an element that isn't there. The
+    # zero-height div that fills this slot keeps the container mounted, so the
+    # reservation above holds in the empty state too -- which is the state it
+    # exists for. It doubles as the gate script's channel to the server.
+    #
+    # Filled after the branch chain below rather than here (see
+    # _gate_slot.html), because one of the attributes it publishes is Add
+    # Position's `ready`, which the chain has not worked out yet at this point
+    # in the run. The placeholder keeps the element in THIS container at THIS
+    # position while its contents are decided later in the same run.
+    _gate_slot = st.empty()
 
     # pop, not get: the confirmation is one-shot. add_position() sets it and
     # Streamlit reruns once to paint it; consuming it here means the NEXT rerun
@@ -2890,7 +3242,7 @@ with st.container(key="symbol_check_results"):
 
     chosen_match = None
     # Why Add Position is disabled, for its tooltip. A disabled button with no
-    # explanation is a dead end, and the five reasons are spread across the
+    # explanation is a dead end, and the reasons are spread across the
     # branches below -- this is the only thing that carries them to the button,
     # which is rendered after this whole block. Stays None on the success path,
     # which is what leaves an enabled button with no tooltip.
@@ -2902,12 +3254,18 @@ with st.container(key="symbol_check_results"):
         # leads nowhere.
         ready = False
         add_help = _NO_PORTFOLIO_HINT
-    elif not clean_symbol:
-        ready = False
-        add_help = "Enter a symbol or name first"
     elif not match:
+        # This covers the empty field too: `match` is False whenever
+        # clean_symbol is "", so the separate "Enter a symbol or name first"
+        # branch that used to sit above this one was both redundant and untrue.
+        # clean_symbol is the COMMITTED value, so it reads empty while the user
+        # is still typing, and that tooltip claimed nothing had been entered
+        # while a symbol was sitting in the field. Naming no symbol is the point
+        # of this wording -- it holds whether the field is empty or holds text
+        # that has not been committed yet, and the action it asks for is the
+        # same either way.
         ready = False
-        add_help = f"Press Enter in the Symbol field (or click Search) to verify {_md_escape(clean_symbol)} first"
+        add_help = "Press Enter in the Symbol field (or click Search) to verify a symbol first"
     elif not check["matches"]:
         upstream_issues = [e for e in check.get("errors", {}).values() if e and e.get("retryable")]
         if upstream_issues:
@@ -3022,6 +3380,29 @@ with st.container(key="symbol_check_results"):
                     f"{chosen_match['atr_info']['atr_value']:.2f}"
                 )
                 ready = True
+
+# Published now that the whole chain has run, into the slot reserved inside
+# symbol_check_results above. These attributes carry everything the gate script
+# cannot work out for itself: the conditions that have nothing to do with the
+# field's contents, the symbol already verified, and Add Position's own verdict.
+# Hung on a zero-height div deliberately -- it is already mounted for the
+# container's min-height, so publishing costs no new element and cannot alter
+# the layout, which a fresh st.html next to the buttons would (every element is
+# a flex item and earns a row gap).
+_gate_slot.html(
+    "<div style='height:0'"
+    f" data-search-gate='{'ok' if not searching and _portfolio_size_set() else 'no'}'"
+    # html.escape, not _md_escape: this lands in an HTML attribute, not
+    # markdown, and the value is whatever the user typed into the Symbol
+    # field. quote=True is what closes the attribute itself.
+    f" data-search-found='{html.escape(_checked['symbol'], quote=True) if already_found else ''}'"
+    # Add Position's server-side verdict, which depends on things no client-side
+    # script can re-derive: whether the symbol resolved, which of several
+    # matches is picked, and whether it is already in the table. The script ANDs
+    # this with its own live-field test, so it can only ever add restriction.
+    f" data-add-ready='{'ok' if ready else 'no'}'"
+    "></div>"
+)
 
 # The append/save/clear work lives in the add_position on_click callback:
 # callbacks run before the next rerun renders any widget, which is what lets
@@ -3473,6 +3854,11 @@ else:
     GRID_CSS = {
         # Balham's 12px default reads too small at this row height; autosizing
         # measures the rendered font, so column widths track this size change.
+        # Deliberately 14px rather than the 16px every other text surface in
+        # the app uses: the table is 14 columns wide, and at 16px autosizing
+        # took its content to 1887px inside a 1578px viewport -- a horizontal
+        # scrollbar on the app's primary output, where 14px fits with room to
+        # spare. This is the one place a smaller size buys something.
         ".ag-cell": {
             "border-right": "1px solid #d5d5d5 !important",
             "padding-left": "6px !important",
@@ -3489,11 +3875,15 @@ else:
             "text-align": "left !important",
             "justify-content": "flex-start !important",
         },
+        # The same 14px as the cells below them. These were 13px -- the
+        # smallest text anywhere in the app, and smaller than the values they
+        # label, which reads as a mistake rather than a hierarchy. The header
+        # row already sets itself apart by weight and background.
         ".ag-header-cell": {
             "border-right": "1px solid #c2c2c2 !important",
             "padding-left": "6px !important",
             "padding-right": "6px !important",
-            "font-size": "13px !important",
+            "font-size": "14px !important",
         },
         # Centering makes header gaps symmetric BY CONSTRUCTION: autoSizePadding
         # slack otherwise piles entirely onto the empty side of an aligned label
@@ -3779,6 +4169,6 @@ else:
     selected_ids = set(selected["id"]) if isinstance(selected, pd.DataFrame) and not selected.empty else set()
     if selected_ids and st.button(f"🗑️ Remove {len(selected_ids)} selected position(s)"):
         st.session_state.positions = [p for p in st.session_state.positions if p["id"] not in selected_ids]
-        st.session_state.grid_mount = st.session_state.get("grid_mount", 0) + 1
+        _clear_grid_selection()
         save_state()
         st.rerun()
