@@ -387,18 +387,32 @@ launcher still reports the download, `.runtime/python/bin/python3` is what
 here, `run.py` would fail at venv creation — that failure is the regression
 this case exists to catch.
 
-- [ ] **Step 7: Case — Python with venv, and the second-run path (fedora:41)**
+- [ ] **Step 7: Case — Python with venv, and the second-run path (python:3.12-slim)**
+
+This case originally used `fedora:41` with `dnf install python3`. On a machine
+behind TLS-inspecting egress (Zscaler here) `dnf` cannot reach Fedora's
+mirrors, so the case could never get to the launcher. `apt-get`, `curl` and
+`pip` all work through it; `dnf` does not. `python:3.12-slim` needs no package
+manager at all — it already ships a venv-capable CPython 3.12 — which is the
+only thing this case actually requires.
 
 ```bash
-docker run --rm -v "$PWD:/src:ro" -v /tmp/psc-linux-verify:/h:ro fedora:41 \
-  sh -c 'dnf install -y -q python3 >/dev/null && /h/case.sh && \
-         echo "--- second run ---" && cd /app && PSC_NO_REEXEC=1 PSC_DIAGNOSE=1 \
-         ./"Start Calculator (Linux).sh"' 2>&1 | tail -40
+docker run --rm -v "$PWD:/src:ro" -v /tmp/psc-linux-verify:/h:ro python:3.12-slim \
+  sh -c 'python3 --version
+         # Assert the premise: this case is only meaningful if the system
+         # Python can build a venv. If it cannot, it has silently become a
+         # duplicate of the download case.
+         python3 -m venv /tmp/probe >/dev/null || {
+           echo "PREMISE GONE: system python3 cannot build a venv"; exit 1; }
+         /h/case.sh
+         echo "--- second run ---"
+         cd /app && PSC_NO_REEXEC=1 PSC_DIAGNOSE=1 ./"Start Calculator (Linux).sh"' 2>&1 | tail -40
 ```
 
-Expected: no download message, no `.runtime` directory created, app serves. The
-second run reuses `.venv`, so `can_make_venv` returns immediately — the run
-should visibly start faster and still serve.
+Expected: `Python 3.12.x`, no download message, **no `.runtime` directory
+created**, and the app serves on both runs. The second run reuses `.venv`, so
+it should visibly start faster and still print `Diagnostics: startup
+succeeded`.
 
 - [ ] **Step 8: Case — musl (alpine:3)**
 
@@ -1635,7 +1649,7 @@ that moves them fails CI.
 ## Verified
 
 Containers against `ubuntu:24.04`, `debian:12-slim` + `python3-minimal`,
-`fedora:41` and `alpine:3`, each asserting via `PSC_DIAGNOSE=1` that the
+`python:3.12-slim` and `alpine:3`, each asserting via `PSC_DIAGNOSE=1` that the
 app actually served rather than that a launcher exited 0. Plus the
 bad-checksum refusal, a path with spaces, the no-tty refusal, and the Mac
 launcher's two paths re-run locally.
