@@ -1304,6 +1304,7 @@ After the `launcher` job's last step and before the `diagnostics` job, add:
 
     steps:
       - name: Install just enough to be the interesting case
+        shell: bash
         run: |
           set -eu
           apt-get update -qq
@@ -1321,6 +1322,7 @@ After the `launcher` job's last step and before the `diagnostics` job, add:
       - uses: actions/checkout@v4
 
       - name: Stand in for run.py
+        shell: bash
         run: |
           cat > run.py <<'PY'
           import sys
@@ -1331,6 +1333,7 @@ After the `launcher` job's last step and before the `diagnostics` job, add:
       - name: Rejects the system Python and downloads its own
         env:
           PSC_NO_REEXEC: "1"
+        shell: bash
         run: |
           set -eu
           ./"Start Calculator (Linux).sh" < /dev/null | tee out.txt
@@ -1338,6 +1341,14 @@ After the `launcher` job's last step and before the `diagnostics` job, add:
           test -x .runtime/python/bin/python3
           test ! -e .runtime/.download
 ```
+
+`shell: bash` on all three steps is load-bearing on the last one: GitHub's
+`shell: bash` adds `-o pipefail`, so `launcher | tee out.txt` reports the
+launcher's failure instead of `tee`'s success. The implicit default is
+`bash -e {0}` with no pipefail. The four `test`-job steps deliberately keep
+no `shell:` key -- that matrix includes `windows-latest`, where the default
+is pwsh, and each of those steps is a single `python ...` command with no
+pipe. Forcing bash there would change Windows behaviour for no benefit.
 
 - [ ] **Step 6: Validate the workflow parses**
 
