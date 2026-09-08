@@ -1650,6 +1650,19 @@ covered by a new test that runs the JavaScript under node and asserts the
 Windows and Mac sentences that `origin/main` produced, so a future edit
 that moves them fails CI.
 
+## Known limitation, accepted deliberately
+
+The terminal-search loop uses `exec`, so if `command -v "$term"` passes and
+`exec "$term"` then fails -- a binary present and executable whose dynamic
+loader is missing -- the shell terminates: the loop neither tries the next
+emulator nor reaches the guidance message. Do not "fix" this by wrapping each
+attempt in a subshell. POSIX sh cannot catch an exec failure in the same
+shell, and a subshell breaks the hand-off on the SUCCESS path: the parent
+would block until the user closed the terminal, then continue the loop and
+open a second one. The trigger needs a broken package install, and the README
+Linux section gives the reader the command directly, so the documented answer
+does not depend on this loop.
+
 ## Verified
 
 Containers against `ubuntu:24.04`, `debian:12-slim` + `python3-minimal`,
