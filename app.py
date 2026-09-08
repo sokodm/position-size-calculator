@@ -3480,6 +3480,10 @@ if SHOW_LAST_REFRESH_CHANGES and change_rows:
         resizable=True, sortable=False, filter=False, suppressHeaderMenuButton=True
     )
     gb_changes.configure_grid_options(rowHeight=GRID_ROW_HEIGHT, headerHeight=GRID_HEADER_HEIGHT)
+    # No GRID_CHROME_HEIGHT and no custom_css here: both exist for the horizontal
+    # scroll widget, which this grid has never been observed to render, and it is
+    # unreachable behind SHOW_LAST_REFRESH_CHANGES so it was not measured. Measure
+    # it on Linux before trusting this height the day that flag is turned on.
     AgGrid(
         changes_df,
         gridOptions=gb_changes.build(),
