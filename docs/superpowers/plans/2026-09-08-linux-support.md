@@ -334,7 +334,14 @@ cd /app
 rm -rf .venv .runtime
 export PSC_NO_REEXEC=1
 export PSC_DIAGNOSE=1
-./"Start Calculator (Linux).sh"
+# Assert on the string run.py prints only after Streamlit genuinely served
+# (run.py:178), not on the exit code. An exit-0 check would also pass if
+# run.py ever returned early, proving the launcher ran but not that the app
+# came up -- which is the whole point of every case below.
+./"Start Calculator (Linux).sh" 2>&1 | tee /tmp/case-out.txt
+grep -q "Diagnostics: startup succeeded" /tmp/case-out.txt \
+  || { echo "FAIL: the app did not serve"; exit 1; }
+echo "SERVED OK"
 EOF
 chmod +x /tmp/psc-linux-verify/case.sh
 ```
