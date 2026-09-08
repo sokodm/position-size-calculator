@@ -275,6 +275,121 @@ jobs:
           test -x .runtime/python/bin/python3
           test ! -e .runtime/.download
 
+  installer:
+    # The end-to-end counterpart to `diagnostics` below, for the two platforms
+    # that job cannot reach. Every step in `launcher` swaps run.py for a stub,
+    # so the real installer -- venv creation, the requirements stamp, pip
+    # install, Streamlit binding its port -- has only ever run in CI on
+    # Windows, inside diagnostics. run.py picks its venv interpreter from
+    # os.name, and the POSIX half of that choice had no job anywhere.
+    #
+    # Scope, so this is not over-read: run.py declares success once something
+    # accepts a TCP connection on the port. That proves Streamlit bound it, not
+    # that app.py rendered -- a page showing a traceback would still serve.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Two cold pip installs -- the second start is asserted not to reinstall --
+    # plus run.py's own 120-second startup budget on each of the three starts.
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Give the machine a Python the launchers actually accept
+        # Same ceiling as `launcher`: the images ship 3.14, which the launchers
+        # refuse. Without this the launcher would download its own Python and
+        # every step below would stop testing the system-Python handoff.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Name the launcher this platform ships
+        shell: bash
+        run: |
+          set -eu
+          case "$RUNNER_OS" in
+            Linux) echo 'LAUNCHER=Start Calculator (Linux).sh' >> "$GITHUB_ENV" ;;
+            macOS) echo 'LAUNCHER=Start Calculator (Mac).command' >> "$GITHUB_ENV" ;;
+            # Adding windows-latest to the matrix would duplicate diagnostics
+            # rather than cover anything, so it fails loudly instead.
+            *) echo "no launcher is mapped for $RUNNER_OS"; exit 1 ;;
+          esac
+
+      - name: Assert the premise -- nothing is installed yet
+        # If a cache step is ever added above, the next step quietly stops
+        # testing environment creation and starts testing the cache.
+        shell: bash
+        run: |
+          set -eu
+          test ! -e .venv
+          test ! -e .runtime
+
+      - name: The real installer builds its environment and serves
+        shell: bash
+        env:
+          # Neither stream is a tty and a runner has no display, so without
+          # this the Linux launcher takes its no-terminal refusal branch. The
+          # Mac launcher never re-execs and ignores it.
+          PSC_NO_REEXEC: "1"
+          # Stops run.py once it has proved the app serves, instead of leaving
+          # it blocked on a server nothing will ever connect to.
+          PSC_DIAGNOSE: "1"
+        run: |
+          set -euo pipefail
+          ./"$LAUNCHER" < /dev/null | tee out.txt
+          grep -q "Creating a private Python environment" out.txt
+          grep -q "Installing dependencies" out.txt
+          grep -q "Diagnostics: startup succeeded" out.txt
+          # run.py resolves its venv interpreter as bin/python on POSIX and
+          # Scripts/python.exe on Windows, and only the Windows half had ever
+          # run in CI. Getting that branch wrong was measured against this job:
+          # it is caught by the exit code and the success line above, not by
+          # the test below -- `python -m venv` writes bin/python whatever run.py
+          # then goes looking for. This pins the location, so a venv built
+          # somewhere else cannot pass merely by having started something.
+          test -x .venv/bin/python
+          # An environment that exists but cannot import what requirements.txt
+          # pins is a failed install that reported success.
+          ./.venv/bin/python -c "import streamlit, st_aggrid, tradingview_mcp"
+          test ! -e .runtime
+
+      - name: A second start reuses the environment
+        # The requirements stamp has no coverage either. If it never matches,
+        # every launch pays a full pip install; this is the half that catches
+        # that, and it is the common case for a returning user.
+        shell: bash
+        env:
+          PSC_NO_REEXEC: "1"
+          PSC_DIAGNOSE: "1"
+        run: |
+          set -euo pipefail
+          ./"$LAUNCHER" < /dev/null | tee out2.txt
+          grep -q "Diagnostics: startup succeeded" out2.txt
+          if grep -q "Installing dependencies" out2.txt; then
+            echo "FAIL  the stamp did not take -- dependencies were reinstalled"
+            exit 1
+          fi
+
+      - name: A changed requirements.txt installs again
+        # The other half of the stamp: if it matched when the file had changed,
+        # an upgrade would silently never reach anyone. The stamp hashes the
+        # file's bytes, so a comment moves the hash without changing what pip
+        # resolves -- the reinstall stays offline-fast and cannot fail on the
+        # network.
+        shell: bash
+        env:
+          PSC_NO_REEXEC: "1"
+          PSC_DIAGNOSE: "1"
+        run: |
+          set -euo pipefail
+          echo "# a comment, to move the hash without moving the pins" >> requirements.txt
+          ./"$LAUNCHER" < /dev/null | tee out3.txt
+          grep -q "Installing dependencies" out3.txt
+          grep -q "Diagnostics: startup succeeded" out3.txt
+
   diagnostics:
     # The reported failure -- a console window that closes on its own -- has
     # never reproduced here, so this job cannot test the bug. What it can test
