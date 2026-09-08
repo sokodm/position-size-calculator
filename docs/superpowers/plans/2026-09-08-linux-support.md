@@ -757,6 +757,10 @@ def main():
     failures = 0
     for name, nav, instruction, files in CASES:
         got = evaluate(block, nav)
+        # Per case, not cumulative: a shared counter silences "ok" for every
+        # case after the first failure, hiding which platforms still work at
+        # the one moment that matters.
+        before = failures
         if got["instruction"] != instruction:
             print("FAIL  " + name + " instruction")
             print("      expected: " + instruction)
@@ -767,7 +771,7 @@ def main():
             print("      expected: " + json.dumps(files))
             print("      received: " + json.dumps(got["files"]))
             failures += 1
-        if not failures:
+        if failures == before:
             print("ok    " + name)
     if failures:
         print("\n%d assertion(s) failed" % failures)
