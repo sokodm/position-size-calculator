@@ -497,51 +497,83 @@ renders.
 
 This must happen before the edit; a baseline taken afterwards proves nothing.
 
+The extraction parses `app.py` with `ast` rather than slicing its text. That is
+not fastidiousness — reading the source gives `"\\\\Start Calculator"`, which
+node then sees as two backslashes, one more than the browser ever receives. The
+value under test is the *evaluated* Python string, so Python has to resolve its
+own escapes first. `ast.walk` is breadth-first and would reorder a
+concatenation, so the pieces are flattened left-to-right by hand.
+
 ```bash
 cd "$(git rev-parse --show-toplevel)"
 mkdir -p /tmp/psc-baseline
 git show origin/main:app.py > /tmp/psc-baseline/app-main.py
 python3 - <<'PY'
-import json, re, subprocess, tempfile, os
-src = open("/tmp/psc-baseline/app-main.py").read()
-# The decision block on main runs from `const nav` to the FILE_BROWSER line;
-# the sentence is the argument of the first say(...) in the same script.
-block = src[src.index("const nav = W.navigator;"):]
-block = block[:block.index('": "your file browser";') + len('": "your file browser";')]
-block = block.replace('""" + json.dumps(APP_DIR_NAME) + """',
-                      '"position-size-calculator-main"')
-m = re.search(r"say\(FILES\.length > 1(.*?)\);", src, re.S)
-sentence = "(" + m.group(1).split("?", 1)[1] + ")"
-harness = """
-const W = {navigator: NAV};
-%s
-const INSTRUCTION = %s;
-console.log(JSON.stringify({instruction: INSTRUCTION, files: FILES}));
-""" % (block, sentence)
+import ast, json, re, subprocess, tempfile, os
+
+FOLDER = "position-size-calculator-main"
+SPLICE = "\x00SPLICE\x00"
+
+def flatten(node):
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return flatten(node.left) + flatten(node.right)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    return [SPLICE]
+
+def dialog_js(path):
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+        if name != "html" or not node.args:
+            continue
+        joined = "".join(flatten(node.args[0]))
+        if "const nav = W.navigator" in joined:
+            return joined
+    raise SystemExit("dialog block not found")
+
+js = dialog_js("/tmp/psc-baseline/app-main.py")
+END = '"your file browser";'
+block = js[js.index("const nav = W.navigator;"):]
+block = block[:block.index(END) + len(END)]
+assert block.count(SPLICE) == 1, "expected exactly one Python splice"
+block = block.replace(SPLICE, json.dumps(FOLDER))
+# The whole conditional expression, condition included: splitting on "?" drops
+# the condition and leaves an invalid ("A" : "B").
+m = re.search(r"say\((FILES\.length > 1.*?)\);", js, re.S)
+harness = ("const W = {navigator: NAV};\n" + block +
+           "\nconst INSTRUCTION = (" + m.group(1) + ");\n"
+           "console.log(JSON.stringify({instruction: INSTRUCTION, files: FILES}));\n")
 for name, nav in [
     ("windows", {"userAgentData": {"platform": "Windows"}, "platform": "Win32",
                  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}),
     ("mac", {"userAgentData": {"platform": "macOS"}, "platform": "MacIntel",
              "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}),
 ]:
-    js = harness.replace("NAV", json.dumps(nav))
+    j = harness.replace("NAV", json.dumps(nav))
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
-        f.write(js); path = f.name
+        f.write(j); path = f.name
     out = subprocess.run(["node", path], capture_output=True, text=True)
     os.unlink(path)
     print(name, "->", out.stdout.strip() or out.stderr.strip())
 PY
 ```
 
-Expected — record these two lines; they are the byte-identical target:
+This was already run by the controller. It MUST reproduce exactly these two
+lines — if it does not, stop and report, because every expectation in Step 2
+is derived from them:
 
 ```
 windows -> {"instruction":"To start it again, double-click this file in File Explorer:","files":["position-size-calculator-main\\Start Calculator (Windows).bat"]}
 mac -> {"instruction":"To start it again, double-click this file in Finder:","files":["position-size-calculator-main/Start Calculator (Mac).command"]}
 ```
 
-If the actual output differs from the above, **stop and report** — the plan's
-expected constants are wrong and the rest of this task is built on them.
+In those JSON lines `\\` is one literal backslash. Confirmed: the Windows
+path contains exactly one, the Mac path none.
+
 
 - [ ] **Step 2: Write the failing test**
 
@@ -560,6 +592,7 @@ Linux support was added. They are asserted rather than described: the point of
 this file is that adding a third platform did not move the other two.
 """
 
+import ast
 import json
 import os
 import subprocess
@@ -622,20 +655,54 @@ CASES = [
 ]
 
 
+SPLICE = "\x00SPLICE\x00"
+
+
+def _pieces(node):
+    """The operands of a string concatenation, in source order.
+
+    ast.walk is breadth-first and would reorder a + b + c, so the tree is
+    flattened left-to-right by hand instead.
+    """
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _pieces(node.left) + _pieces(node.right)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    return [SPLICE]
+
+
 def decision_block():
+    """The marked region as the browser receives it.
+
+    Sliced out of app.py as raw text, the Windows path's backslash escape
+    arrives at node doubled -- one more backslash than a browser ever sees --
+    because Python's own escapes have not been resolved yet. So parse app.py
+    and evaluate the string literal rather than reading its source text.
+    """
     with open(APP, encoding="utf-8") as fh:
-        src = fh.read()
-    if START not in src or END not in src:
-        raise AssertionError(
-            "app.py no longer carries the extraction markers this test needs:\n"
-            "  " + START + "\n  " + END
-        )
-    block = src[src.index(START) + len(START):src.index(END)]
-    # The one Python splice inside the block.
-    splice = '""" + json.dumps(APP_DIR_NAME) + """'
-    if splice not in block:
-        raise AssertionError("the APP_DIR_NAME splice is no longer in the block")
-    return block.replace(splice, json.dumps(FOLDER))
+        tree = ast.parse(fh.read())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        func = node.func
+        name = (func.attr if isinstance(func, ast.Attribute)
+                else getattr(func, "id", ""))
+        if name != "html":
+            continue
+        js = "".join(_pieces(node.args[0]))
+        if START not in js or END not in js:
+            continue
+        block = js[js.index(START) + len(START):js.index(END)]
+        if block.count(SPLICE) != 1:
+            raise AssertionError(
+                "expected exactly one Python splice (APP_DIR_NAME) inside the "
+                "marked block, found %d" % block.count(SPLICE)
+            )
+        return block.replace(SPLICE, json.dumps(FOLDER))
+    raise AssertionError(
+        "no components.html(...) call carries the extraction markers:\n"
+        "  " + START + "\n  " + END
+    )
 
 
 def evaluate(block, nav):
@@ -706,8 +773,9 @@ Expected: `exit=1` with the message about the missing extraction markers —
 
 - [ ] **Step 4: Add the markers and the Linux branch to `app.py`**
 
-Replace lines 2392–2419 (from `const nav = W.navigator;` through the
-`FILE_BROWSER` definition) so the region is marker-delimited and gains Linux.
+Anchor on the code text, never on line numbers (they have already drifted
+once). Amend the region from `const nav = W.navigator;` through the
+`FILE_BROWSER` definition so the region is marker-delimited and gains Linux.
 The three comment blocks already above `const nav`, `const FOLDER` and
 `const FILE_BROWSER` stay exactly as they are — only add what is shown here.
 
@@ -777,7 +845,7 @@ browser"` fallback still serves the unrecognised branch.
 
 - [ ] **Step 5: Replace the derived sentence at the `say(...)` call**
 
-Replace these five lines (currently `app.py:2474-2478`):
+Replace these five lines (search for `say(FILES.length > 1`):
 
 ```javascript
             say(FILES.length > 1
