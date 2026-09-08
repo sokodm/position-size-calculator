@@ -438,7 +438,11 @@ docker run --rm -v "$PWD:/src:ro" ubuntu:24.04 sh -c '
   # launcher reads the aarch64 line. Corrupting only x86_64 would leave the
   # hash actually used intact -- the download would succeed and this case
   # would pass while proving nothing.
-  sed -i "s/^\(        PY_SHA256=\)\".*\"/\1\"deadbeef\"/" \
+  # [0-9a-f][0-9a-f]* rather than .* -- the launcher has a THIRD
+  # PY_SHA256="" branch, the unrecognised-architecture default, and .* matches
+  # empty. That corrupted three lines instead of two and tripped the guard
+  # below, which is how this was caught.
+  sed -i "s/^\(        PY_SHA256=\)\"[0-9a-f][0-9a-f]*\"/\1\"deadbeef\"/" \
     "Start Calculator (Linux).sh"
   test "$(grep -c deadbeef "Start Calculator (Linux).sh")" = 2 \
     || { echo "the sed did not corrupt both hashes"; exit 1; }
