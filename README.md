@@ -70,8 +70,8 @@ the terminal window open while you use the app** — closing it stops the app.
 
 If your computer has no Python, the start file says so and fetches its own
 private copy (24 MB on Mac, 45 MB on Windows, 33 MB on Linux) into the folder
-before carrying on. You do not have to do anything — it is just why the very first start can
-take a little longer.
+before carrying on. You do not have to do anything — it is just why the
+very first start can take a little longer.
 
 ### If it does not start
 
