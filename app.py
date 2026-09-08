@@ -85,6 +85,17 @@ APP_DIR_NAME = APP_DIR.name
 # tall (a blank strip below the last row that reads as a stray empty box).
 GRID_HEADER_HEIGHT = 34
 GRID_ROW_HEIGHT = 42
+# What ag-Grid's own chrome takes on top of HEADER + ROW*n for a grid whose
+# iframe height is locked and whose horizontal scroll widget is in the layout.
+# Measured on Linux (Chromium 152, classic scrollbars) at both 2 and 3 rows: the
+# header renders 35 rather than the 34 it is told, plus a 1px gap above and below
+# that widget. Constant across row counts -- that is why it is its own term and
+# not padding on the two above, which multiply and would recreate the blank-strip
+# bug. Without it the body viewport is 3px short of its content and every table
+# carries a permanent vertical scroll bar. Only the positions grid is measured
+# against this; a grid that renders no horizontal scroll widget has not been
+# checked and should not assume the same 3px.
+GRID_CHROME_HEIGHT = 3
 
 SHOW_LAST_REFRESH_CHANGES = False
 
@@ -3927,6 +3938,22 @@ else:
         '.ag-header-cell[col-id="Tranche Size ($)"] .ag-header-cell-text': {
             "font-weight": "700",
         },
+        # Under classic scrollbars (Linux, Windows) ag-Grid gives the
+        # horizontal scroll bar a real 15px flex slot below the body viewport,
+        # so the viewport shrinks by 15px inside an iframe whose height is
+        # already fixed at grid_height and the last row is sliced in half.
+        # Measured on Debian 12 / Chromium 152 at a 500px width: viewport 108
+        # against 126px of rows, 18 of the last row's 42 pixels cut off.  macOS
+        # overlay scrollbars do not hit this -- ag-Grid detects them and sets
+        # this widget position:absolute itself. Doing the same unconditionally
+        # takes the bar out of flow everywhere, which restored the viewport to
+        # 123 (the macOS number exactly) and costs macOS nothing.
+        ".ag-body-horizontal-scroll": {
+            "position": "absolute !important",
+            "bottom": "0",
+            "left": "0",
+            "right": "0",
+        },
         # Built and toggled by _MORE_HINT_INSTALL_JS above. Absolutely
         # positioned inside .ag-root-wrapper (already position:relative) so the
         # pair costs no layout height -- grid_height below stays exactly a
@@ -3989,12 +4016,13 @@ else:
     # the whole table renders blank. Passing an explicit pixel height sized to
     # the row count sidesteps that broken callback while still avoiding
     # leftover empty space below a short table.
-    # No buffer is added for the horizontal scroll bar: under macOS overlay
-    # scrollbars it takes no layout height. UNVERIFIED on Windows/Linux classic
-    # scrollbars, where ag-Grid gives it a real flex slot and the last row may
-    # clip -- if that turns up, suppress the scroll bar or measure it at
-    # runtime; padding these constants would recreate the blank-strip bug.
-    grid_height = GRID_HEADER_HEIGHT + GRID_ROW_HEIGHT * len(df)
+    # No buffer is added for the horizontal scroll bar itself: the
+    # .ag-body-horizontal-scroll rule in GRID_CSS takes it out of flow on every
+    # platform, so it never claims layout height. GRID_CHROME_HEIGHT covers what
+    # is left -- ag-Grid's header overshoot and the gaps around that widget.
+    grid_height = (
+        GRID_HEADER_HEIGHT + GRID_ROW_HEIGHT * len(df) + GRID_CHROME_HEIGHT
+    )
     # server_wins: the push-back below writes every accepted edit into session
     # state before rerunning, so state is always the source of truth and the
     # grid must follow it. The default client_wins ignores ALL server data
