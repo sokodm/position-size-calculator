@@ -65,8 +65,12 @@ button near the top right, then **Download ZIP**.
   text editor instead. The command above always works.
 
 The first start takes a few minutes while it downloads and installs what it
-needs; after that it opens in seconds. Your browser opens automatically. **Leave
-the terminal window open while you use the app** — closing it stops the app.
+needs; after that it opens in seconds. Your browser opens automatically. The app
+then keeps running on its own, so the terminal window can be closed — and
+starting it again just reopens the tab rather than starting a second copy.
+
+To stop it: quit `python` from Activity Monitor on Mac, from the Task Manager's
+**Details** tab on Windows, or run `pkill -f streamlit` on Linux.
 
 If your computer has no Python, the start file says so and fetches its own
 private copy (24 MB on Mac, 45 MB on Windows, 33 MB on Linux) into the folder

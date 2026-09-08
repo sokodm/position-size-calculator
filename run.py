@@ -48,6 +48,9 @@ ERROR_LOG = LOG_DIR / "run-py-last-error.log"
 # Records the app a previous start left running in the background, so starting
 # again opens the browser on it rather than standing up a second server.
 RUNNING = LOG_DIR / "app-running.json"
+# Everything Streamlit said during a start that failed. Written only on failure
+# and removed on the next start that works, so its presence means something.
+STARTUP_LOG = LOG_DIR / "startup-failure.log"
 # Set by the diagnostics: stop once the app has proved it serves, rather than
 # blocking on it the way a normal start does.
 DIAGNOSE = os.environ.get("PSC_DIAGNOSE") == "1"
@@ -89,11 +92,24 @@ def venv_python() -> Path:
 
 
 def run_step(command: list[str], description: str) -> None:
-    result = subprocess.run(command)
-    if result.returncode != 0:
-        fail(f"{description} failed (exit code {result.returncode}). "
-             "The app was not started.",
-             "command: " + " ".join(command))
+    """Run one setup step, keeping its output if it fails.
+
+    A failing step -- almost always pip without a working network -- explains
+    itself in its own output, and an exit code alone does not. That output used
+    to go only to the console, where Windows loses it with the window, so it is
+    written to the failure log as well as reprinted here. Nothing is captured
+    on success: pip runs --quiet and has nothing to say.
+    """
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode == 0:
+        return
+    said = ((result.stdout or "") + (result.stderr or "")).strip()
+    if said:
+        print(said, file=sys.stderr)
+    fail(f"{description} failed (exit code {result.returncode}). "
+         f"The app was not started. Details: {ERROR_LOG}",
+         "command: " + " ".join(command)
+         + (f"\n\noutput:\n{said}" if said else "\n\n(the step printed nothing)"))
 
 
 def ensure_environment() -> Path:
@@ -195,20 +211,27 @@ def detached() -> dict:
 
 
 def startup_detail(capture: Path | None) -> str:
-    """What Streamlit said before it failed, for the crash report only.
+    """Keep everything Streamlit said before it failed, and point the report at it.
 
-    Nothing on the happy path reads this and nothing is left behind for it:
-    main() deletes the scratch file as soon as the app is serving. It exists so
-    that a start which fails still says why, now that the output no longer goes
-    to the window.
+    A start that works leaves nothing behind -- main() deletes the scratch file
+    the moment the app serves. A start that fails is the opposite case: the
+    reason no longer reaches the window, so the whole output is kept in the app
+    folder, and its last lines are inlined here so the crash report says
+    something without a second file having to be opened.
     """
     if capture is None:
         return "The output above says why."
     try:
-        said = capture.read_text(encoding="utf-8", errors="replace").splitlines()
+        said = capture.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return f"(could not read {capture}: {exc})"
-    return "Streamlit's last output:\n" + "\n".join(said[-40:])
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        STARTUP_LOG.write_text(said, encoding="utf-8")
+        kept = f"Full startup output: {STARTUP_LOG}\n\n"
+    except OSError as exc:
+        kept = f"(could not write {STARTUP_LOG}: {exc})\n\n"
+    return kept + "Streamlit's last output:\n" + "\n".join(said.splitlines()[-40:])
 
 
 def wait_until_serving(process: subprocess.Popen, port: int,
@@ -304,6 +327,17 @@ def main() -> None:
             process.terminate()
             process.wait()
             return
+    # An earlier failure's logs would otherwise sit in the app folder looking
+    # like a current problem -- and tools/diagnose.ps1 reads the error log back
+    # into its report, so a stale one shows up as exceptions from a start that
+    # actually worked. The app is already serving by this point, so a cleanup
+    # that cannot proceed is worth a note and nothing more.
+    for stale in (STARTUP_LOG, ERROR_LOG):
+        try:
+            stale.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"  (could not remove the old {stale.name}: {exc})",
+                  file=sys.stderr)
     try:
         capture.unlink()
     except OSError:
