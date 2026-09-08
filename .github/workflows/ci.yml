@@ -13,12 +13,12 @@ permissions:
 
 jobs:
   test:
-    # Both are launcher targets, so both get tested. 3.10 is the floor the
-    # README promises; 3.12 is what a fresh install gets today.
+    # All three are launcher targets, so all three get tested. 3.10 is the
+    # floor the README promises; 3.12 is what a fresh install gets today.
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
         python-version: ["3.10", "3.12"]
     runs-on: ${{ matrix.os }}
 
@@ -42,6 +42,11 @@ jobs:
       - name: State, validation and sizing maths
         run: python tests/test_state.py
 
+      - name: The stopped-app dialog names the right file per platform
+        # Runner images all ship node, which this needs: the dialog is
+        # JavaScript inside a Python string, so it is run rather than parsed.
+        run: python tests/test_stopped_dialog.py
+
   launcher:
     # The job above cannot test the launchers: setup-python hands it the very
     # thing the launchers exist to provide. This one runs each launcher for
@@ -49,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -117,18 +122,32 @@ jobs:
           set -euo pipefail
           mac="Start Calculator (Mac).command"
           win="Start Calculator (Windows).bat"
+          lin="Start Calculator (Linux).sh"
           ver=$(sed -n 's/^PY_VERSION="\(.*\)"$/\1/p' "$mac")
           build=$(sed -n 's/^PY_BUILD="\(.*\)"$/\1/p' "$mac")
           echo "launchers pin CPython $ver from release $build"
+          rc=0
+          # The drift guard that stands in for a shared provisioning library:
+          # three standalone launchers may duplicate the download logic, but
+          # they may not disagree about what they are downloading.
+          for f in "$win" "$lin"; do
+            grep -qF "$ver" "$f" || { echo "FAIL  $f does not pin CPython $ver"; rc=1; }
+            grep -qF "$build" "$f" || { echo "FAIL  $f does not pin release $build"; rc=1; }
+          done
           curl -fsSL -o SHA256SUMS \
             "https://github.com/astral-sh/python-build-standalone/releases/download/$build/SHA256SUMS"
-          rc=0
-          for spec in "aarch64-apple-darwin:$mac" \
-                      "x86_64-apple-darwin:$mac" \
-                      "x86_64-pc-windows-msvc:$win"; do
-            triple=${spec%%:*}
-            file=${spec#*:}
-            asset="cpython-$ver+$build-$triple-install_only.tar.gz"
+          # Linux pins install_only_stripped -- the same interpreter without
+          # debug symbols, which takes its download from 106 MB to 33 MB -- so
+          # the variant travels with the triple rather than being assumed.
+          for spec in "aarch64-apple-darwin:$mac:install_only" \
+                      "x86_64-apple-darwin:$mac:install_only" \
+                      "x86_64-pc-windows-msvc:$win:install_only" \
+                      "x86_64-unknown-linux-gnu:$lin:install_only_stripped" \
+                      "aarch64-unknown-linux-gnu:$lin:install_only_stripped"; do
+            triple=$(echo "$spec" | cut -d: -f1)
+            file=$(echo "$spec" | cut -d: -f2)
+            variant=$(echo "$spec" | cut -d: -f3)
+            asset="cpython-$ver+$build-$triple-$variant.tar.gz"
             # Exact field match: a substring grep also matches every other
             # Python version's line for the same triple.
             published=$(awk -v a="$asset" '$2 == a { print $1 }' SHA256SUMS)
@@ -136,7 +155,7 @@ jobs:
               echo "FAIL  the release has no $asset"
               rc=1
             elif grep -qF "$published" "$file"; then
-              echo "ok    $triple"
+              echo "ok    $triple ($variant)"
             else
               echo "FAIL  $triple: $file does not pin $published"
               rc=1
@@ -162,6 +181,98 @@ jobs:
           PATH="$PWD/shim:$PATH" ./"Start Calculator (Mac).command" < /dev/null | tee out2.txt
           grep -q "RUNPY_VERSION=3.12.14" out2.txt
           grep -q ".runtime" out2.txt
+          test ! -e .runtime/.download
+
+      - name: Linux -- uses the Python already on the machine
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          # stdin is redirected and stdout is piped, so neither is a tty, and a
+          # runner has no DISPLAY. Without this the launcher would take the
+          # no-terminal branch and this step would test the refusal path.
+          PSC_NO_REEXEC: "1"
+        run: |
+          ./"Start Calculator (Linux).sh" < /dev/null | tee out.txt
+          grep -q "RUNPY_VERSION=3." out.txt
+          test ! -e .runtime
+
+      - name: Linux -- downloads its own Python when the machine has none
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          PSC_NO_REEXEC: "1"
+        run: |
+          mkdir -p shim
+          printf '#!/bin/sh\nexit 1\n' > shim/python3
+          chmod +x shim/python3
+          PATH="$PWD/shim:$PATH" ./"Start Calculator (Linux).sh" < /dev/null | tee out2.txt
+          grep -q "RUNPY_VERSION=3.12.14" out2.txt
+          grep -q ".runtime" out2.txt
+          test ! -e .runtime/.download
+
+      - name: Linux -- refuses to run with no terminal and no display
+        # The one step that deliberately leaves PSC_NO_REEXEC unset. With both
+        # streams redirected and no display, the launcher must print the command
+        # to run and fail, rather than fail silently.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set +e
+          env -u DISPLAY -u WAYLAND_DISPLAY -u PSC_NO_REEXEC \
+            ./"Start Calculator (Linux).sh" < /dev/null > notty.txt 2>&1
+          rc=$?
+          set -e
+          cat notty.txt
+          test "$rc" -ne 0
+          grep -q "Please open a terminal in this folder and run:" notty.txt
+
+  launcher-linux-novenv:
+    # The only job that can prove the venv fallthrough fires. debian:12-slim
+    # with python3-minimal is the shape of a real Debian box: python3 exists and
+    # passes the version check, but python3-venv is absent, so `python3 -m venv`
+    # fails. The launcher must reject that interpreter and download its own --
+    # if it accepted it, run.py would die building .venv.
+    runs-on: ubuntu-latest
+    container: debian:12-slim
+    timeout-minutes: 15
+
+    steps:
+      - name: Install just enough to be the interesting case
+        shell: bash
+        run: |
+          set -eu
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            python3-minimal ca-certificates curl tar git
+          python3 --version
+          # Assert the trap is set. If a future image ships a working ensurepip
+          # this job would quietly become a second system-Python test, and the
+          # fallthrough would stop being covered anywhere.
+          if python3 -m venv /tmp/probe >/dev/null 2>&1; then
+            echo "python3 -m venv works here -- this job no longer tests what it claims"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Stand in for run.py
+        shell: bash
+        run: |
+          cat > run.py <<'PY'
+          import sys
+          print("RUNPY_INTERPRETER=" + sys.executable)
+          print("RUNPY_VERSION=%d.%d.%d" % sys.version_info[:3])
+          PY
+
+      - name: Rejects the system Python and downloads its own
+        env:
+          PSC_NO_REEXEC: "1"
+        shell: bash
+        run: |
+          set -eu
+          ./"Start Calculator (Linux).sh" < /dev/null | tee out.txt
+          grep -q "RUNPY_VERSION=3.12.14" out.txt
+          test -x .runtime/python/bin/python3
           test ! -e .runtime/.download
 
   diagnostics:

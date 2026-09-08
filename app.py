@@ -85,6 +85,17 @@ APP_DIR_NAME = APP_DIR.name
 # tall (a blank strip below the last row that reads as a stray empty box).
 GRID_HEADER_HEIGHT = 34
 GRID_ROW_HEIGHT = 42
+# What ag-Grid's own chrome takes on top of HEADER + ROW*n for a grid whose
+# iframe height is locked and whose horizontal scroll widget is in the layout.
+# Measured on Linux (Chromium 152, classic scrollbars) at both 2 and 3 rows: the
+# header renders 35 rather than the 34 it is told, plus a 1px gap above and below
+# that widget. Constant across row counts -- that is why it is its own term and
+# not padding on the two above, which multiply and would recreate the blank-strip
+# bug. Without it the body viewport is 3px short of its content and every table
+# carries a permanent vertical scroll bar. Only the positions grid is measured
+# against this; a grid that renders no horizontal scroll widget has not been
+# checked and should not assume the same 3px.
+GRID_CHROME_HEIGHT = 3
 
 SHOW_LAST_REFRESH_CHANGES = False
 
@@ -2388,12 +2399,21 @@ components.html(
         // because "Macintosh" and "Windows" never co-occur, but a future
         // platform string that contains neither must land on the both-files
         // branch rather than being guessed at.
+        // --- platform decision (extracted by tests/test_stopped_dialog.py) ---
+        // Everything to the end marker is pure: it reads navigator and builds
+        // strings, touching no DOM, which is what lets a test run it under
+        // node. Keep it that way -- move DOM work below the marker.
         const nav = W.navigator;
         const plat = (nav.userAgentData && nav.userAgentData.platform)
             || nav.platform || "";
         const ua = nav.userAgent || "";
         const IS_WIN = /Win/i.test(plat) || /Windows|Win32|Win64/i.test(ua);
         const IS_MAC = !IS_WIN && (/Mac/i.test(plat) || /Mac/i.test(ua));
+        // Android's user agent also says "Linux", and a phone has no start file
+        // to run, so it must not take the Linux branch -- it belongs on the
+        // fallback that lists all three.
+        const IS_LINUX = !IS_WIN && !IS_MAC && !/Android/i.test(ua)
+            && (/Linux/i.test(plat) || /X11/i.test(ua));
         // The bare file name alone does not say where to look, and this folder
         // has no single name to write down: a "Download ZIP" unpacks to
         // position-size-calculator-main, a clone gives position-size-calculator,
@@ -2409,14 +2429,35 @@ components.html(
         const FOLDER = """ + json.dumps(APP_DIR_NAME) + """;
         const WIN_FILE = FOLDER + "\\\\Start Calculator (Windows).bat";
         const MAC_FILE = FOLDER + "/Start Calculator (Mac).command";
+        // A command to type, not a path to point at: the file name has spaces,
+        // so an unquoted ./Start Calculator (Linux).sh is a shell error rather
+        // than a start. Single-quoted here purely so the inner double quotes
+        // need no escaping. The folder moves into the sentence instead, since a
+        // terminal is already inside it by the time this is run.
+        const LINUX_FILE = './"Start Calculator (Linux).sh"';
         const FILES = IS_WIN ? [WIN_FILE]
             : IS_MAC ? [MAC_FILE]
-                : [WIN_FILE, MAC_FILE];
+                : IS_LINUX ? [LINUX_FILE]
+                    : [WIN_FILE, MAC_FILE, LINUX_FILE];
         // Naming the actual file manager keeps the instruction pointing at the
         // reader's computer rather than at this window, which is the one place
         // the file cannot be opened from.
         const FILE_BROWSER = IS_WIN ? "File Explorer"
             : IS_MAC ? "Finder" : "your file browser";
+        // Explicit per platform, not derived from FILES.length. The count used
+        // to imply the platform -- one file meant "recognised", two meant "not"
+        // -- and Linux breaks that inference: it has one file and still needs
+        // its own sentence, because a .sh is not something a double-click can
+        // be promised to run.
+        const INSTRUCTION = IS_WIN || IS_MAC
+            ? "To start it again, double-click this file in "
+              + FILE_BROWSER + ":"
+            : IS_LINUX
+                ? "To start it again, open a terminal in the " + FOLDER
+                  + " folder and run:"
+                : "To start it again, double-click the file for your computer in "
+                  + FILE_BROWSER + ":";
+        // --- end platform decision ---
 
         // Nothing on a web page can launch a local program, and once the server
         // is gone there is no process left to ask -- so the start file genuinely
@@ -2471,11 +2512,7 @@ components.html(
             // stored -- five paragraphs that buried the only sentence anyone
             // has to act on. Naming the file browser carries the "this lives on
             // your computer" point on its own.
-            say(FILES.length > 1
-                ? "To start it again, double-click the file for your computer in "
-                  + FILE_BROWSER + ":"
-                : "To start it again, double-click this file in "
-                  + FILE_BROWSER + ":");
+            say(INSTRUCTION);
             for (const name of FILES) {
                 const box = D.createElement("div");
                 // A solid rounded panel in the app's own grey reads as a button,
@@ -3443,6 +3480,10 @@ if SHOW_LAST_REFRESH_CHANGES and change_rows:
         resizable=True, sortable=False, filter=False, suppressHeaderMenuButton=True
     )
     gb_changes.configure_grid_options(rowHeight=GRID_ROW_HEIGHT, headerHeight=GRID_HEADER_HEIGHT)
+    # No GRID_CHROME_HEIGHT and no custom_css here: both exist for the horizontal
+    # scroll widget, which this grid has never been observed to render, and it is
+    # unreachable behind SHOW_LAST_REFRESH_CHANGES so it was not measured. Measure
+    # it on Linux before trusting this height the day that flag is turned on.
     AgGrid(
         changes_df,
         gridOptions=gb_changes.build(),
@@ -3901,6 +3942,22 @@ else:
         '.ag-header-cell[col-id="Tranche Size ($)"] .ag-header-cell-text': {
             "font-weight": "700",
         },
+        # Under classic scrollbars (Linux, Windows) ag-Grid gives the
+        # horizontal scroll bar a real 15px flex slot below the body viewport,
+        # so the viewport shrinks by 15px inside an iframe whose height is
+        # already fixed at grid_height and the last row is sliced in half.
+        # Measured on Debian 12 / Chromium 152 at a 500px width: viewport 108
+        # against 126px of rows, 18 of the last row's 42 pixels cut off.  macOS
+        # overlay scrollbars do not hit this -- ag-Grid detects them and sets
+        # this widget position:absolute itself. Doing the same unconditionally
+        # takes the bar out of flow everywhere, which restored the viewport to
+        # 123 (the macOS number exactly) and costs macOS nothing.
+        ".ag-body-horizontal-scroll": {
+            "position": "absolute !important",
+            "bottom": "0",
+            "left": "0",
+            "right": "0",
+        },
         # Built and toggled by _MORE_HINT_INSTALL_JS above. Absolutely
         # positioned inside .ag-root-wrapper (already position:relative) so the
         # pair costs no layout height -- grid_height below stays exactly a
@@ -3963,12 +4020,13 @@ else:
     # the whole table renders blank. Passing an explicit pixel height sized to
     # the row count sidesteps that broken callback while still avoiding
     # leftover empty space below a short table.
-    # No buffer is added for the horizontal scroll bar: under macOS overlay
-    # scrollbars it takes no layout height. UNVERIFIED on Windows/Linux classic
-    # scrollbars, where ag-Grid gives it a real flex slot and the last row may
-    # clip -- if that turns up, suppress the scroll bar or measure it at
-    # runtime; padding these constants would recreate the blank-strip bug.
-    grid_height = GRID_HEADER_HEIGHT + GRID_ROW_HEIGHT * len(df)
+    # No buffer is added for the horizontal scroll bar itself: the
+    # .ag-body-horizontal-scroll rule in GRID_CSS takes it out of flow on every
+    # platform, so it never claims layout height. GRID_CHROME_HEIGHT covers what
+    # is left -- ag-Grid's header overshoot and the gaps around that widget.
+    grid_height = (
+        GRID_HEADER_HEIGHT + GRID_ROW_HEIGHT * len(df) + GRID_CHROME_HEIGHT
+    )
     # server_wins: the push-back below writes every accepted edit into session
     # state before rerunning, so state is always the source of truth and the
     # grid must follow it. The default client_wins ignores ALL server data
