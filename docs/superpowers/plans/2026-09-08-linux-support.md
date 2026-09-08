@@ -1353,12 +1353,19 @@ dependency.
 - [ ] **Step 7: Verify the macOS and Windows steps are untouched**
 
 ```bash
-git diff .github/workflows/ci.yml | grep '^-' | grep -v '^---' | grep -vE 'os: \[|Both are launcher|set -euo|mac=|win=|ver=|build=|echo "launchers|curl -fsSL|for spec|triple=|file=|asset=|published=|if \[ -z|echo "FAIL|rc=1|elif grep|echo "ok|else|done|exit .rc|SHA256SUMS|# Exact field|fi'
+python3 scripts/ci-nonregression.py origin/main
 ```
 
-Expected: no output. Every removed line belongs either to the two matrix lines,
-the reworded comment, or the hash step being rewritten — nothing from a macOS or
-Windows launcher step.
+Expected: six `ok` lines and exit 0 — `diagnostics` byte-identical, all three
+base jobs keeping every step they had, and both matrices still carrying
+`macos-latest` and `windows-latest` alongside the new ubuntu runner.
+
+This compares the workflow's parsed job tree against the base revision. Do not
+replace it with a grep over the diff text: that guard has to carry a list of
+literal fragments allowed to disappear, and every prose rewrap or loop rewrite
+makes the list wrong. The version this replaced could not print nothing even
+for a perfectly correct edit — it let four legitimate lines through, and a
+maintainer who trusted it would either chase phantoms or learn to ignore it.
 
 - [ ] **Step 8: Commit**
 
@@ -1602,27 +1609,20 @@ Task 3 made README claim CI covers three platforms before Task 4 had added the
 third. That contradiction is fine mid-branch and must not survive to the PR.
 
 ```bash
-git diff origin/main --stat -- .github/workflows/ci.yml | grep -q ci.yml \
-  || { echo "PREMISE GONE: Task 4 changed no CI file, so there is nothing to agree with"; exit 1; }
-rc=0
-for job in test launcher; do
-    python3 -c "
-import sys, yaml
-d = yaml.safe_load(open('.github/workflows/ci.yml'))
-os_list = d['jobs']['$job']['strategy']['matrix']['os']
-sys.exit(0 if any('ubuntu' in o for o in os_list) else 1)
-" && echo "ok    $job matrix includes ubuntu" \
-   || { echo "FAIL  $job matrix has no ubuntu runner, but README promises Linux CI"; rc=1; }
-done
+python3 scripts/ci-nonregression.py origin/main || exit 1
 grep -q 'macOS, Windows and Linux' README.md \
-  || { echo "FAIL  README no longer makes the three-platform claim this step guards"; rc=1; }
-exit $rc
+  || { echo "FAIL  README no longer makes the three-platform claim this step guards"; exit 1; }
+echo "ok    CI matrices and the README agree"
 ```
 
-Expected: `ok    test matrix includes ubuntu`, `ok    launcher matrix includes
-ubuntu`, exit 0. A `FAIL` here means the branch would ship a README that
-describes CI it does not have; fix the matrix rather than softening the README,
-because the Linux launcher is only actually covered if a Linux runner runs it.
+Expected: the script's six `ok` lines, then `ok    CI matrices and the README
+agree`. A failure means the branch would ship a README describing CI it does
+not have; fix the matrix rather than softening the README, because the Linux
+launcher is only actually covered if a Linux runner runs it.
+
+Verified both ways: before Task 4 the matrix half reported `FAIL` for both jobs
+and exited 1; after Task 4 it exits 0. An assert only ever seen to pass cannot
+distinguish a healthy branch from a broken check.
 
 - [ ] **Step 6: Code review before the PR**
 
