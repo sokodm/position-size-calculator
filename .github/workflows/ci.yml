@@ -469,16 +469,6 @@ jobs:
           print("only one server")
           PY
 
-      - name: The port survives a lost state file
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -f logs/app-running.json
-          python run.py | tee out3.txt
-          # Without the record, the preferred port is health-checked directly;
-          # if that check regressed, this start would drift to 8766.
-          grep -q "already running at http://localhost:8765" out3.txt
-
       - name: A start that fails says why, in a file
         shell: bash
         run: |
@@ -522,12 +512,29 @@ jobs:
           test ! -f logs/startup-failure.log
           test ! -f logs/run-py-last-error.log
 
+      - name: The port survives a lost state file
+        # Ordered last of the assertions on purpose: it deletes the record the
+        # step below stops the app with, and a reuse does not write the record
+        # back -- the port probe is what covers that case, and there is no pid
+        # to record when the probe is what found the app.
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f logs/app-running.json
+          python run.py | tee out3.txt
+          # Without the record, the preferred port is health-checked directly;
+          # if that check regressed, this start would drift to 8766.
+          grep -q "already running at http://localhost:8765" out3.txt
+
       - name: Stop the app
         if: always()
         shell: bash
         run: |
           python - <<'PY'
           import json, os, pathlib, signal
+          # Absent by design after the step above, which deletes it. The runner
+          # is discarded either way; this only avoids leaving a server behind
+          # when the job fails earlier than that.
           state = pathlib.Path("logs/app-running.json")
           if state.exists():
               try:
