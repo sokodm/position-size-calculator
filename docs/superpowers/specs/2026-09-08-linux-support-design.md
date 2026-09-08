@@ -235,11 +235,43 @@ the macOS and Windows jobs keep running verbatim.
 
 ### Changed: `README.md`
 
-Additive Linux rows alongside the existing ones: extract step, the `chmod +x`
-fallback, the terminal command, per-distro Python install (`apt`, `dnf`,
-`pacman`), a troubleshooting row for "double-click opened it in a text editor",
-the Linux download size (33 MB x86_64 / 28 MB arm64, measured above), and Linux
-added to the sentence naming the platforms CI covers.
+Linux content is added to the lists that are already "find your OS and do that
+one thing" (the install walkthrough, `Installing Python`) and kept *out* of the
+shared troubleshooting table, which gets its own Linux section instead.
+
+**Additive, following the existing per-OS bullet pattern:**
+
+- Step 2 (Unzip): a Linux bullet (`unzip`, or double-click the ZIP).
+- Step 3 (Start it): a Linux bullet giving the terminal command
+  `./"Start Calculator (Linux).sh"`, and noting double-click works on some
+  desktops but opens an editor on many.
+- `Installing Python`: a Linux block with `apt` / `dnf` / `pacman`, calling out
+  that `python3-venv` matters as much as `python3` on Debian and Ubuntu.
+- `Advanced: install with Git`: the Mac command is already correct for Linux, so
+  its heading becomes "on **Mac** or **Linux**" — a one-word edit, no new block.
+
+**New section `### Linux: if it does not start`,** placed after
+`### Windows: getting a diagnosis` so nothing above it shifts and the shared
+table's "see **Windows: getting a diagnosis** below" still points at the very
+next section. Four rows, unprefixed because the heading scopes them:
+double-click opens a text editor; `Permission denied` (the `chmod +x` fallback,
+needed because some extractors drop the exec bit); it downloads its own Python
+even though `python3` is installed (expected on Debian/Ubuntu, not a fault);
+and "not one we have a Python download for" (non-x86-64/ARM64, or musl).
+
+**The shared `### If it does not start` table changes zero bytes.** Its two
+generic rows already read correctly on Linux, and leaving it untouched turns
+requirement 1 below into a diff of nothing rather than a diff to be argued
+harmless. This is a deliberate departure from the table's existing habit of
+OS-prefixing rows (`Mac:`, `Windows:`): three more prefixed rows would make the
+first thing a struggling user reads mostly about other people's platforms.
+
+**Three sentences must change** because they are false on Linux as written: the
+intro's "Download, unzip, double-click" promise (gains a parenthetical pointing
+at step 3), step 3's "and double-click:" lead-in (becomes "and start the file
+for your system:"), and the private-Python size list (gains "33 MB on Linux";
+arm64's 28 MB is not worth a parenthetical here). Linux is also added to the
+sentence naming the platforms CI covers.
 
 ## Non-regression on macOS and Windows
 
