@@ -14,6 +14,19 @@ primaryColor = "#5DADE2"
 toolbarMode = "viewer"
 
 [server]
+# Streamlit binds every interface by default, then advertises the addresses it
+# guesses for them. Those guesses are wrong on a machine with a VPN tunnel:
+# "Network URL" comes back as the tunnel's own point-to-point address (an
+# RFC 6598 100.64.x.x one here) and "External URL" as the VPN's egress IP,
+# which forwards nothing inbound. Both were reported as dead links, and run.py
+# prints the URL that does work on the very next line anyway.
+#
+# Pinning loopback replaces all three lines with one that works, and closes the
+# exposure sitting behind them: this app has no authentication and reads and
+# writes positions.json, so it has no business answering anyone but the person
+# who started it.
+address = "127.0.0.1"
+
 # The watcher exists so a developer editing app.py gets asked to rerun. Nobody
 # running this as a calculator ever edits app.py, so the only thing the prompt
 # can do for them is appear unexplained over their positions -- and it does,
