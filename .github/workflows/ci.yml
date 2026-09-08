@@ -291,8 +291,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # A cold pip install of streamlit, three times over, plus run.py's own
-    # 120-second startup budget on each start.
+    # Two cold pip installs -- the second start is asserted not to reinstall --
+    # plus run.py's own 120-second startup budget on each of the three starts.
     timeout-minutes: 25
 
     steps:
