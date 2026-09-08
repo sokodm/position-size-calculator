@@ -390,6 +390,152 @@ jobs:
           grep -q "Installing dependencies" out3.txt
           grep -q "Diagnostics: startup succeeded" out3.txt
 
+  background-start:
+    # Everything above this job runs run.py with PSC_DIAGNOSE=1, which returns
+    # before the branch a real start takes: detaching Streamlit, redirecting it
+    # to a scratch file, recording the running instance and reusing it next
+    # time. That branch is what users get, and it had no coverage on any
+    # platform -- including the two pieces of it that only exist on Windows,
+    # DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP and the tasklist liveness
+    # probe, which had never executed anywhere.
+    #
+    # run.py is invoked directly rather than through a launcher: the launchers
+    # are covered above, and on POSIX they would take their no-terminal branch
+    # instead of reaching this code.
+    #
+    # Assertions are written to run unchanged on all three platforms, so they
+    # avoid pgrep and taskkill and ask Python and the health endpoint instead.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # One cold pip install plus four starts, each with run.py's own
+    # 120-second startup budget.
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Give the machine a Python run.py accepts
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: A start leaves the app running and says where it is
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The subshell exits before the assertions run, so anything still
+          # answering afterwards outlived the shell that started it -- which is
+          # the whole point of the detach.
+          bash -c "python run.py" | tee out.txt
+          grep -q "is running at" out.txt
+          test -f logs/app-running.json
+          python - <<'PY'
+          import json, pathlib, urllib.request
+          state = json.loads(pathlib.Path("logs/app-running.json").read_text())
+          assert state["port"] == 8765, state
+          got = urllib.request.urlopen(
+              f"http://127.0.0.1:{state['port']}/_stcore/health", timeout=10).read()
+          assert got.strip() == b"ok", got
+          print("still serving after the launching shell exited")
+          PY
+
+      - name: Nothing is logged into the app folder while it works
+        shell: bash
+        run: |
+          set -euo pipefail
+          # app-running.json is state, not a log. Anything else here means a
+          # start that worked wrote a log anyway.
+          found=$(ls logs/ | grep -v '^app-running.json$' || true)
+          if [ -n "$found" ]; then
+            echo "FAIL  a successful start left logs behind:"; echo "$found"; exit 1
+          fi
+
+      - name: A second start reuses it instead of serving twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          python run.py | tee out2.txt
+          grep -q "already running" out2.txt
+          # A second server would have taken the next free port, so an answer
+          # on 8766 is the failure this asserts against.
+          python - <<'PY'
+          import socket, sys
+          with socket.socket() as probe:
+              if probe.connect_ex(("127.0.0.1", 8766)) == 0:
+                  sys.exit("FAIL  something is serving on 8766 -- a second server started")
+          print("only one server")
+          PY
+
+      - name: The port survives a lost state file
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f logs/app-running.json
+          python run.py | tee out3.txt
+          # Without the record, the preferred port is health-checked directly;
+          # if that check regressed, this start would drift to 8766.
+          grep -q "already running at http://localhost:8765" out3.txt
+
+      - name: A start that fails says why, in a file
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, pathlib, signal, socket, time
+          state = pathlib.Path("logs/app-running.json")
+          if state.exists():
+              os.kill(json.loads(state.read_text())["pid"], signal.SIGTERM)
+              state.unlink()
+          for _ in range(50):
+              with socket.socket() as probe:
+                  if probe.connect_ex(("127.0.0.1", 8765)) != 0:
+                      break
+              time.sleep(0.2)
+          else:
+              raise SystemExit("port 8765 never freed")
+          PY
+          # Streamlit cannot bind an address the runner does not have, so it
+          # exits during startup -- a real failure rather than a simulated one.
+          set +e
+          STREAMLIT_SERVER_ADDRESS=203.0.113.9 python run.py > out4.txt 2>&1
+          code=$?
+          set -e
+          cat out4.txt
+          test "$code" -ne 0
+          test -f logs/startup-failure.log
+          test -f logs/run-py-last-error.log
+          # POSIX says "Can't assign requested address" (errno 49/99) and
+          # Windows says "not valid in its context" (WSAEADDRNOTAVAIL), so both
+          # spellings of the same refusal are accepted.
+          grep -qiE "assign requested address|not valid in its context" logs/startup-failure.log
+          grep -q "Full startup output" logs/run-py-last-error.log
+
+      - name: The next start that works clears those logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python run.py | tee out5.txt
+          grep -q "is running at" out5.txt
+          test ! -f logs/startup-failure.log
+          test ! -f logs/run-py-last-error.log
+
+      - name: Stop the app
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, signal
+          state = pathlib.Path("logs/app-running.json")
+          if state.exists():
+              try:
+                  os.kill(json.loads(state.read_text())["pid"], signal.SIGTERM)
+              except OSError as exc:
+                  print(f"nothing to stop: {exc}")
+          PY
+
   diagnostics:
     # The reported failure -- a console window that closes on its own -- has
     # never reproduced here, so this job cannot test the bug. What it can test
