@@ -205,6 +205,10 @@ goto done
 
 :done
 call :log "finished with status %RUN_STATUS%"
+REM On success the app is already running in the background and this window has
+REM nothing left in it to read, so it closes on its own. A failure keeps it
+REM open, since the message above it is the only thing the reader has to go on.
+if "%RUN_STATUS%"=="0" exit /b 0
 echo.
 pause
 exit /b %RUN_STATUS%
