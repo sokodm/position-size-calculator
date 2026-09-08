@@ -896,10 +896,15 @@ proof: those two strings came from `origin/main` in Step 1.
 
 ```bash
 python3 -m compileall -q app.py run.py tests && echo "compile OK"
-python3 tests/test_state.py
+.venv/bin/python tests/test_state.py
 ```
 
-Expected: `compile OK`, and `test_state.py` passing as before. It does not
+Expected: `compile OK`, and `ALL PASS` from `test_state.py`. Use the
+project's `.venv`, not the system `python3`: `test_state.py` imports
+`tradingview_mcp`, which is installed only there, so a system `python3`
+gives `ModuleNotFoundError` and looks like a regression it is not. CI hits
+this differently -- it installs `requirements.txt` first. `test_state.py`
+does not
 cover this code — it is here to catch a mangled edit to a 230 KB file.
 
 - [ ] **Step 8: Commit**
@@ -1561,7 +1566,7 @@ app for everyone.
 
 ```bash
 python3 -m compileall -q app.py run.py tests && echo "compile OK"
-python3 tests/test_state.py
+.venv/bin/python tests/test_state.py
 python3 tests/test_stopped_dialog.py
 ```
 
