@@ -83,7 +83,7 @@ very first start can take a little longer.
 |---|---|
 | Mac: "unidentified developer" | Right-click `Start Calculator (Mac).command` → **Open** → **Open**. Once only. |
 | Windows: "Windows protected your PC" | Click **More info** → **Run anyway**. Once only. |
-| Window opens and closes instantly | Usually the app is being run from inside the ZIP preview — extract the folder properly (step 2). If it is extracted and still closes, see **Windows: getting a diagnosis** below. |
+| Window opens and closes without the browser opening | On Windows the window closing is normal once the app has started — this row is about it closing with no browser tab. Usually the app is being run from inside the ZIP preview: extract the folder properly (step 2). If it is extracted and still closes, see **Windows: getting a diagnosis** below. |
 | Anything about Python failing to download | Check your internet connection and try again. If it keeps failing, install Python by hand — see [Installing Python](#installing-python). |
 
 ### Windows: getting a diagnosis
