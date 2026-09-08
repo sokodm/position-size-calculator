@@ -1596,6 +1596,34 @@ Expected: both `100755`. A `100644` here means a Linux user's download would
 arrive non-executable — fix with `git update-index --chmod=+x "Start Calculator (Linux).sh"`
 and amend.
 
+- [ ] **Step 5b: Prove the docs are not lying about CI**
+
+Task 3 made README claim CI covers three platforms before Task 4 had added the
+third. That contradiction is fine mid-branch and must not survive to the PR.
+
+```bash
+git diff origin/main --stat -- .github/workflows/ci.yml | grep -q ci.yml \
+  || { echo "PREMISE GONE: Task 4 changed no CI file, so there is nothing to agree with"; exit 1; }
+rc=0
+for job in test launcher; do
+    python3 -c "
+import sys, yaml
+d = yaml.safe_load(open('.github/workflows/ci.yml'))
+os_list = d['jobs']['$job']['strategy']['matrix']['os']
+sys.exit(0 if any('ubuntu' in o for o in os_list) else 1)
+" && echo "ok    $job matrix includes ubuntu" \
+   || { echo "FAIL  $job matrix has no ubuntu runner, but README promises Linux CI"; rc=1; }
+done
+grep -q 'macOS, Windows and Linux' README.md \
+  || { echo "FAIL  README no longer makes the three-platform claim this step guards"; rc=1; }
+exit $rc
+```
+
+Expected: `ok    test matrix includes ubuntu`, `ok    launcher matrix includes
+ubuntu`, exit 0. A `FAIL` here means the branch would ship a README that
+describes CI it does not have; fix the matrix rather than softening the README,
+because the Linux launcher is only actually covered if a Linux runner runs it.
+
 - [ ] **Step 6: Code review before the PR**
 
 Dispatch `feature-dev:code-reviewer` **without** a `name` argument (a named
