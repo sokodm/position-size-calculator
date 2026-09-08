@@ -1402,7 +1402,7 @@ ensurepip and stops being the interesting case."
 ### Task 5: The table-height question
 
 **Files:**
-- Investigate: `app.py:3966` (`grid_height`)
+- Investigate: `app.py:3997` (`grid_height`), comment at `app.py:3990-3996`
 - Modify: only if the clipping reproduces
 
 **Interfaces:**
@@ -1471,9 +1471,10 @@ last row's bottom edge falls below the grid's own box), or
 
 - [ ] **Step 4a: If it does NOT reproduce — report and stop**
 
-Record the measured numbers, take a screenshot for the record, and update the
-comment at `app.py:3966` to replace "UNVERIFIED on Windows/Linux" with what was
-actually measured on Linux, leaving Windows still marked unverified. Then:
+Record the measured numbers, take a screenshot for the record, and update
+the comment at `app.py:3990-3996` to replace "UNVERIFIED on Windows/Linux"
+with what was actually measured on Linux, leaving Windows still marked
+unverified. Then:
 
 ```bash
 git add app.py
@@ -1487,40 +1488,73 @@ clip, so only the Windows half of that warning still stands."
 A null result is the end of this task. **Do not** change `grid_height` because
 clipping seems plausible.
 
-- [ ] **Step 4b: If it DOES reproduce — measure at runtime, never pad**
+- [x] **Step 4b: It DID reproduce — fixed here (rulings R24, R25)**
 
-`GRID_HEADER_HEIGHT` and `GRID_ROW_HEIGHT` are shared by all three platforms,
-and the same comment records that padding them recreates a blank-strip bug. The
-fix must be a measurement that is a no-op where the scroll bar takes no layout
-height, which is macOS. Add to the grid's JS options, alongside the existing
-grid setup:
+It reproduced: viewport 108 against 126px of rows, 18 of the last row's 42
+pixels cut off. The fix shipped in this task rather than the next one, because
+the whole cost was the container + Xvfb + Playwright measurement stack, which
+only exists inside this session's container; a later task would have had to
+rebuild it to verify a ten-line change.
 
-```javascript
-// A classic scroll bar (Linux, Windows) takes a real flex slot inside the
-// grid and pushes the last row past the fixed pixel height; a macOS overlay
-// scroll bar takes none, so measuring gives 0 there and this is inert.
-// Padding GRID_ROW_HEIGHT instead would add the strip on every platform --
-// which is the blank-strip bug that comment warns about.
-onFirstDataRendered: (e) => {
-  const v = document.querySelector('.ag-body-viewport');
-  const bar = v ? v.offsetHeight - v.clientHeight : 0;
-  if (bar > 0) {
-    e.api.setGridOption('domLayout', 'normal');
-    const root = document.querySelector('.ag-root-wrapper');
-    if (root) { root.style.height = (root.offsetHeight + bar) + 'px'; }
-  }
-}
+The three routes below stay closed, and none of them is what shipped:
+
+1. `app.py:3870` already passes `onFirstDataRendered=_FIT_COLUMNS_JS`, and 3871
+   binds the same JsCode to `onGridSizeChanged`. A second `onFirstDataRendered`
+   key is a duplicate, not an addition — and the existing pair is better anyway,
+   since a scroll bar can appear on a resize too.
+2. `setGridOption('domLayout', 'normal')` is a no-op: an explicit pixel
+   `height=grid_height` is already passed, so the layout is already normal. The
+   `autoHeight` route is rejected by the comment at `app.py:3985-3989` — its
+   `setFrameHeight` callback fires before `fitCellContents` finishes and the
+   table renders blank at 0px.
+3. Growing `.ag-root-wrapper` from inside the component cannot work alone:
+   `st_aggrid` sizes the *iframe* to `grid_height`, so a taller inner wrapper is
+   clipped by the iframe rather than shown.
+
+A fourth route, which neither the plan nor the app's comment considered, is what
+shipped — and it is better than the suppression the comment recommends, because
+the bar stays usable. ag-Grid *already* sets `.ag-body-horizontal-scroll` to
+`position: absolute` when it detects overlay scrollbars, which is exactly why
+macOS never had this bug. Doing the same unconditionally through `GRID_CSS`
+takes the bar out of flow on classic-scrollbar platforms too:
+
+```python
+".ag-body-horizontal-scroll": {
+    "position": "absolute !important",
+    "bottom": "0", "left": "0", "right": "0",
+},
 ```
 
-Then re-run Steps 2–3 and confirm `lastRowBottom <= gridBottom`, **and** re-run
-the same measurement on the host macOS browser to confirm `bar === 0` and the
-grid height is unchanged from before. Commit only with both results recorded.
+That alone restored the Linux viewport from 108 to 123 — the macOS number
+exactly — but the screenshot then showed a *second* defect the plan never
+anticipated: a permanent vertical scroll bar, because `grid_height` was 3px
+short of its content on every platform (the header renders 35 against the 34 it
+is told, plus a 1px gap above and below the scroll widget). Measured constant at
+both 2 and 3 rows, so it shipped as its own one-time `GRID_CHROME_HEIGHT = 3`
+term.
+
+`GRID_HEADER_HEIGHT` and `GRID_ROW_HEIGHT` stay untouched, as required. They are
+shared by all three platforms and multiply per row, so padding either recreates
+the blank-strip bug the comment warns about — which is precisely why the 3px went
+into a separate constant only after being shown not to scale with row count.
+
+Result, all with the horizontal overflow confirmed active:
+
+| | grid | viewport | content | last row |
+|---|---|---|---|---|
+| Linux before, 3 rows | 160 | 108 | 126 | 18px clipped |
+| Linux after, 3 rows | 163 | 126 | 126 | intact |
+| Linux after, 2 rows | 121 | 84 | 84 | intact |
+| macOS after, 3 rows | 163 | 126 | 126 | intact |
+
+macOS is unchanged in kind — the widget was already `absolute` there, so the CSS
+rule is a no-op — and gains only the 3px it was also silently losing.
 
 - [ ] **Step 5: Tear down the container**
 
 ```bash
-docker rm -f psc-linux
-docker ps --filter name=psc-linux
+docker rm -f psc-lin
+docker ps --filter name=psc-lin
 ```
 
 Expected: no rows.
@@ -1599,10 +1633,31 @@ TradingView, so run it by hand only if the search or refresh paths were touched
 - [ ] **Step 4: Check the diff for machine-local paths**
 
 ```bash
-git diff origin/main | grep -nE '~/|/Users/|C:\\Users|C:\\path\\to|dsokolovsky' || echo "no local paths"
+PAT="/Users/[A-Za-z0-9]|C:\\\\Users\\\\[A-Za-z0-9]|~/(Documents|Desktop)|$(id -un)"
+git diff origin/main | grep -nE "$PAT" || echo "no local paths"
 ```
 
 Expected: `no local paths`.
+
+The pattern is shaped so that this plan, which is itself in the diff being
+greped, is not a hit. Two rules make that hold, and breaking either turns the
+step into a guard that can only ever report itself:
+
+- derive the account name with `$(id -un)`; never write it into the file. A
+  literal one would trip the guard and would also be exactly what the guard
+  exists to forbid — a machine-local value pinned into a shared file.
+- every prefix requires a following path character, so the alternation above
+  does not match its own text, and neither does prose that names a prefix
+  without completing it into a path.
+- do not write example paths into this step. An illustrative one is
+  indistinguishable from a real finding, which is why the reasoning here stays
+  abstract. Test the pattern against examples on the command line instead —
+  both directions, clean on this diff and flagging a fabricated hit — and keep
+  them out of the file.
+
+The reader's own expanded home is deliberately not matched: a runtime-expanded
+cache or downloads directory resolves correctly on every machine. Only the
+directories where a personal workspace layout leaks in are listed.
 
 - [ ] **Step 5: Confirm the new launcher's mode survived into git**
 
