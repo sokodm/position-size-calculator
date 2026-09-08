@@ -35,7 +35,8 @@ right show the inputs and the ATR they were derived from.](docs/screenshot.png)
 unzip, double-click — the start file sorts out everything it needs, including
 Python itself if your computer does not already have it. Nothing is installed
 system-wide, nothing asks for your password, and nothing changes your computer's
-settings: it all stays inside the folder you unzipped.
+settings: it all stays inside the folder you unzipped. (On Linux it is one
+command in a terminal rather than a double-click; see step 3.)
 
 **1. Download** — go to the app's page on GitHub:
 <https://github.com/sokodm/position-size-calculator>. Click the green **Code**
@@ -47,19 +48,29 @@ button near the top right, then **Download ZIP**.
 - **Windows** — right-click the ZIP file → **Extract All…** → **Extract**.
   Do not skip this: double-clicking a ZIP on Windows only previews it, and the
   app cannot run from a preview.
+- **Linux** — double-click the ZIP file, or run
+  `unzip position-size-calculator-main.zip` in a terminal.
 
-**3. Start it** — open the unzipped folder and double-click:
+**3. Start it** — open the unzipped folder and start the file for your system:
 
 - **Mac** — `Start Calculator (Mac).command`
 - **Windows** — `Start Calculator (Windows).bat`
+- **Linux** — open a terminal in the folder and run:
+
+  ```sh
+  ./"Start Calculator (Linux).sh"
+  ```
+
+  Double-clicking it does work on some Linux desktops, but many open it in a
+  text editor instead. The command above always works.
 
 The first start takes a few minutes while it downloads and installs what it
 needs; after that it opens in seconds. Your browser opens automatically. **Leave
 the terminal window open while you use the app** — closing it stops the app.
 
 If your computer has no Python, the start file says so and fetches its own
-private copy (24 MB on Mac, 45 MB on Windows) into the folder before carrying
-on. You do not have to do anything — it is just why the very first start can
+private copy (24 MB on Mac, 45 MB on Windows, 33 MB on Linux) into the folder
+before carrying on. You do not have to do anything — it is just why the very first start can
 take a little longer.
 
 ### If it does not start
@@ -83,6 +94,15 @@ The start file also keeps a running log of its own steps in
 `logs\launcher-steps.log`, written as each step happens — so the last line tells
 you where it got to even when the window is gone. Neither file leaves your
 computer; both are ignored by Git.
+
+### Linux: if it does not start
+
+| Message | Fix |
+|---|---|
+| Double-clicking the start file opens it in a text editor | That is your desktop's setting for executable text files, not a fault. Start it from a terminal instead — step 3. |
+| `Permission denied` | Your unzip tool dropped the file's executable flag. Run `chmod +x "Start Calculator (Linux).sh"` once, then start it again. |
+| It downloads its own Python even though `python3` is installed | Expected on Debian and Ubuntu, where `python3` ships without the `venv` piece the app needs. It fetches its own copy rather than fail halfway through. Nothing to fix — or install `python3-venv` if you would rather it used yours. |
+| "not one we have a Python download for", or a message about musl | Your machine is not x86-64 or ARM64, or it uses musl rather than glibc (Alpine). Install Python from your package manager — see [Installing Python](#installing-python). |
 
 ### Installing Python
 
@@ -111,20 +131,34 @@ down. It is free and takes about two minutes.
 4. Click **Install Now** and wait for it to finish.
 5. Close the installer and double-click `Start Calculator (Windows).bat` again.
 
+**Linux**
+
+Use your distribution's package manager. On Debian or Ubuntu the `venv` package
+matters as much as Python itself — without it the app cannot build its private
+environment, and will download its own Python instead:
+
+```sh
+sudo apt install python3 python3-venv     # Debian, Ubuntu, Mint
+sudo dnf install python3                  # Fedora
+sudo pacman -S python                     # Arch
+```
+
+Then run `./"Start Calculator (Linux).sh"` again.
+
 ### Advanced: install with Git
 
 Unlike the double-click route, **this one needs Python 3.10–3.13 already
 installed** (3.14 is not supported yet — one of the pinned dependencies caps
 there, and the start files download a private 3.12 rather than use it) —
 `run.py` is itself a Python program, so it cannot fetch the thing that runs it.
-That bootstrap lives in the two start files.
+That bootstrap lives in the three start files.
 
 ```sh
 git clone https://github.com/sokodm/position-size-calculator.git
 cd position-size-calculator
 ```
 
-Then, on **Mac**:
+Then, on **Mac** or **Linux**:
 
 ```sh
 python3 run.py
@@ -251,7 +285,7 @@ python3 tests/test_state.py     # state, validation, sizing maths. No network.
 python3 tests/test_lookup.py    # symbol search and refresh. Needs network.
 ```
 
-`test_state.py` runs in CI on macOS and Windows — the two platforms the
+`test_state.py` runs in CI on macOS, Windows and Linux — the three platforms the
 launchers target — against Python 3.10 (the floor this project supports) and
 3.12. `test_lookup.py` calls TradingView and
 is run by hand. See

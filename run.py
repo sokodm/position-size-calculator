@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-command launcher for the Position Size Calculator (macOS + Windows).
+"""One-command launcher for the Position Size Calculator (macOS, Windows and Linux).
 
 Creates a private virtual environment beside this file, installs the pinned
 dependencies, starts Streamlit on a free port and opens the browser. Safe to

@@ -44,7 +44,7 @@ If you move or rename `run_pending_symbol_check`, update `_CUTOFF_FUNC` in
   accurate if you change the values, and re-measure rather than guess.
 - **Fail loudly.** Don't fall back to a default when the operation was supposed
   to produce real data — a wrong position size is worse than a visible error.
-- **The launcher must keep working on both macOS and Windows.** Everything in
+- **The launchers must keep working on macOS, Windows and Linux.** Everything in
   `run.py` resolves relative to the file itself and passes argument lists
   rather than shell strings, so the folder can be moved, renamed, or sit at a
   path containing spaces. Keep it that way.
