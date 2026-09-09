@@ -34,35 +34,18 @@ right show the inputs and the ATR they were derived from.](docs/screenshot.png)
 **You do not need to install Python, or anything else, first.** Get the files,
 double-click — the start file sorts out everything it needs, including Python
 itself if your computer does not already have it. Nothing is installed
-system-wide, nothing asks for your password, and nothing changes your computer's
-settings: it all stays inside the app's own folder. (One place needs a terminal:
-on Linux the start file is a command rather than a double-click. It is in
-step 3.)
+system-wide and nothing changes your computer's settings: it all stays inside
+the app's own folder. (Two things are not a plain double-click: on Mac, macOS may
+block the first start and make you approve the app once — step 3 covers it — and
+on Linux the start file is a terminal command.)
 
-**1. Get the files**
+**1. Get the files** — go to the app's page on GitHub:
+<https://github.com/sokodm/position-size-calculator>. Click the green **Code**
+button near the top right, then **Download ZIP**.
 
-- **Mac** — install **GitHub Desktop** from <https://desktop.github.com> and
-  open it. If it asks you to sign in, look for a **Skip** or **Cancel** option;
-  cloning a public app does not need an account, but signing in works too if
-  that is easier. Choose **File → Clone Repository…**, click the **URL** tab,
-  paste `https://github.com/sokodm/position-size-calculator` and click
-  **Clone**.
+**2. Unzip**
 
-  Use this rather than Download ZIP. macOS refuses to open files that came out
-  of a downloaded ZIP and gives you no way to click past it; files arriving
-  through GitHub Desktop are never flagged, so the app simply opens. Updating
-  later is one click, and it leaves your saved positions alone.
-
-- **Windows** and **Linux** — go to the app's page on GitHub:
-  <https://github.com/sokodm/position-size-calculator>. Click the green **Code**
-  button near the top right, then **Download ZIP**.
-
-**2. Unzip** — only if you downloaded a ZIP; GitHub Desktop hands Mac a folder
-that is ready to use.
-
-- **Mac** — double-click the ZIP file. macOS will then block the start file, so
-  read [Mac: if you used Download ZIP](#mac-if-you-used-download-zip) before
-  step 3.
+- **Mac** — double-click the ZIP file.
 - **Windows** — right-click the ZIP file → **Extract All…** → **Extract**.
   Do not skip this: double-clicking a ZIP on Windows only previews it, and the
   app cannot run from a preview.
@@ -73,10 +56,10 @@ that is ready to use.
 
 - **Mac** — `Start Calculator (Mac).command`
 
-  GitHub Desktop puts the folder in `Documents/GitHub/position-size-calculator`
-  unless you picked somewhere else. Double-click the start file; nothing blocks
-  it. (If you took the ZIP route anyway, see [Mac: if you used Download
-  ZIP](#mac-if-you-used-download-zip) below.)
+  If macOS refuses to open it — *"Apple could not verify… is free of malware"* —
+  that is expected on the first try. [Mac: macOS blocked the start
+  file](#mac-macos-blocked-the-start-file) below walks through approving it. You
+  do it once, and never again.
 
 - **Windows** — `Start Calculator (Windows).bat`
 - **Linux** — open a terminal in the folder and run:
@@ -101,34 +84,57 @@ private copy (24 MB on Mac, 45 MB on Windows, 33 MB on Linux) into the folder
 before carrying on. You do not have to do anything — it is just why the
 very first start can take a little longer.
 
-### Mac: if you used Download ZIP
+### Mac: macOS blocked the start file
 
-The ZIP still works, but macOS will refuse to open the start file the first
-time: *"Apple could not verify 'Start Calculator (Mac).command' is free of
-malware."* That is not about this app — macOS flags every file that came out of
-a downloaded ZIP, whoever wrote it, and the dialog deliberately offers no way
-through. Cloning with GitHub Desktop (step 1) avoids it entirely.
+Double-clicking `Start Calculator (Mac).command` the first time may be refused
+with *"Apple could not verify 'Start Calculator (Mac).command' is free of
+malware that may harm your Mac or compromise your privacy."*
 
-Click **Done** — do **not** click *Move to Trash* — then:
+Nothing is wrong with the app or with your Mac. macOS puts a hidden
+"came from the internet" mark on every file that comes out of a ZIP you
+downloaded, whoever wrote it, and it will not run a marked program unless the
+author has paid for Apple's notarisation service. You approve it by hand once.
 
-1. Open **System Settings → Privacy & Security**.
-2. Scroll down to **Security**. A line names the blocked file, with an **Open
-   Anyway** button beside it.
-3. Click **Open Anyway**, then confirm.
+**The dialog cannot start the app.** It offers only **Move to Trash** and
+**Done** — click **Done**, and do not go hunting for a third button. The
+approval happens somewhere else.
 
-That button only appears for a short while after the block, so do it straight
-away; if it has gone, double-click the start file again to bring it back. The
-first time it runs, the start file clears the flag from the whole folder, so
-this is a one-time thing rather than something you repeat.
+Then, straight away:
 
-Right-click → **Open** was the old fix for this. macOS 15 (Sequoia) removed it,
-which is why it no longer does anything.
+1. Open **System Settings** — the grey gear in the Dock, or press ⌘-Space and
+   type "System Settings".
+2. Click **Privacy & Security** in the list down the left-hand side.
+3. Scroll that panel to the bottom, to the **Security** heading.
+4. Under it is a line naming the file that was just blocked, with an **Open
+   Anyway** button on the right of it. Click that.
+5. Confirm with Touch ID, or your Mac login password.
+6. One last dialog appears, this time *with* an **Open Anyway** button. Click it.
+
+The app starts, and that is the end of it. On that first run the start file
+clears the download mark from its own folder, so nothing here happens again —
+not on the next double-click, not for any other file in the folder.
+
+**Do it right after the block.** The line under **Security** disappears on its
+own after a while. If it has already gone, double-click the start file again to
+bring it back, and carry on from step 3.
+
+#### If there is no Open Anyway line
+
+Look at **Allow applications from** in that same **Security** section. If it is
+greyed out and reads *"This setting has been managed by a profile"*, the Mac is
+centrally managed — a work or school laptop, or one under a family Screen Time
+profile — and that policy has turned off per-app approval altogether. No setting
+you can reach will bring the button back. Ask whoever administers the Mac to
+approve the file, or run the app on a personal Mac.
+
+Right-click → **Open** used to be the quick way through this. macOS 15 (Sequoia)
+removed it, which is why it now does nothing.
 
 ### If it does not start
 
 | Message | Fix |
 |---|---|
-| Mac: "Apple could not verify… is free of malware", or "unidentified developer" | The files came out of a downloaded ZIP. Click **Done** — *not* **Move to Trash** — then follow [Mac: if you used Download ZIP](#mac-if-you-used-download-zip). Getting the files with GitHub Desktop instead (step 1) avoids the block altogether. |
+| Mac: "Apple could not verify… is free of malware", or "unidentified developer" | Expected on the first start, because the files came out of a downloaded ZIP. Click **Done** — *not* **Move to Trash** — then approve the app once in System Settings: [Mac: macOS blocked the start file](#mac-macos-blocked-the-start-file). |
 | Windows: "Windows protected your PC" | Click **More info** → **Run anyway**. Once only. |
 | Window opens and closes without the browser opening | On Windows the window closing is normal once the app has started — this row is about it closing with no browser tab. Usually the app is being run from inside the ZIP preview: extract the folder properly (step 2). If it is extracted and still closes, see **Windows: getting a diagnosis** below. |
 | Anything about Python failing to download | Check your internet connection and try again. If it keeps failing, install Python by hand — see [Installing Python](#installing-python). |

@@ -24,8 +24,8 @@ if xattr -p com.apple.quarantine "$(basename "$0")" >/dev/null 2>&1; then
     if ! xattr -dr com.apple.quarantine . 2>/dev/null; then
         echo "Note: macOS's download flag could not be cleared from this folder."
         echo "The app still starts, but macOS may block this file again next"
-        echo "time. The README's \"Mac: if you used Download ZIP\" section has"
-        echo "the two-click fix."
+        echo "time. The README's \"Mac: macOS blocked the start file\" section"
+        echo "has the fix."
         echo
     fi
 fi
