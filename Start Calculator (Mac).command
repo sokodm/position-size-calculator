@@ -7,17 +7,18 @@
 cd "$(dirname "$0")" || exit 1
 
 # A browser-downloaded ZIP arrives with every file flagged com.apple.quarantine,
-# and macOS hard-blocks a flagged unsigned script on double-click -- that dialog
-# offers Move to Trash and nothing else. Being allowed to run does not mean the
-# flag is gone: "Open Anyway" records a Gatekeeper exception for this one file
-# and commonly leaves the flag in place, and running the file from Terminal
-# skips the check entirely. So clear it folder-wide, which is what stops the
-# next double-click hitting the same wall. Guarded because the recursive walk
-# would otherwise cross .venv (~435 MB) on every launch; a folder with no flag,
-# including any git clone, skips it. basename rather than "$0" because the cd
-# above has already moved, and a relative $0 would no longer resolve. xattr is
-# a native binary, not the Python script it once was, so unlike python3 it
-# cannot trip the developer-tools dialog safe_to_probe_system_python() dodges.
+# and macOS hard-blocks a flagged unsigned script on double-click -- the dialog
+# offers only Move to Trash or Done, and neither one runs it. Being allowed to
+# run does not mean the flag is gone: "Open Anyway" records a Gatekeeper
+# exception for this one file and commonly leaves the flag in place, and running
+# the file from Terminal skips the check entirely. So clear it folder-wide,
+# which is what stops the next double-click hitting the same wall. Guarded
+# because the recursive walk would otherwise cross .venv (~435 MB) on every
+# launch; a folder with no flag, including any git clone, skips it. basename
+# rather than "$0" because the cd above has already moved, and a relative $0
+# would no longer resolve. Unlike python3, xattr is not one of the xcrun-gated
+# stubs, so it cannot raise the developer-tools prompt that
+# safe_to_probe_system_python() exists to dodge.
 if xattr -p com.apple.quarantine "$(basename "$0")" >/dev/null 2>&1; then
     # Exit status is 0 when files simply have no flag, so a failure here is real.
     if ! xattr -dr com.apple.quarantine . 2>/dev/null; then

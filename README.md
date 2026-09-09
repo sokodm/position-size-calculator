@@ -41,10 +41,12 @@ step 3.)
 
 **1. Get the files**
 
-- **Mac** — install **GitHub Desktop** from <https://desktop.github.com>, open
-  it, and skip the sign-in if it offers one — a public app needs no account.
-  Choose **File → Clone Repository…**, click the **URL** tab, paste
-  `https://github.com/sokodm/position-size-calculator` and click **Clone**.
+- **Mac** — install **GitHub Desktop** from <https://desktop.github.com> and
+  open it. If it asks you to sign in, look for a **Skip** or **Cancel** option;
+  cloning a public app does not need an account, but signing in works too if
+  that is easier. Choose **File → Clone Repository…**, click the **URL** tab,
+  paste `https://github.com/sokodm/position-size-calculator` and click
+  **Clone**.
 
   Use this rather than Download ZIP. macOS refuses to open files that came out
   of a downloaded ZIP and gives you no way to click past it; files arriving
