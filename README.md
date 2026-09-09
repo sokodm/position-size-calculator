@@ -31,29 +31,51 @@ right show the inputs and the ATR they were derived from.](docs/screenshot.png)
 
 ## Install it
 
-**You do not need to install Python, or anything else, first.** Download,
-unzip, double-click — the start file sorts out everything it needs, including
-Python itself if your computer does not already have it. Nothing is installed
+**You do not need to install Python, or anything else, first.** Get the files,
+double-click — the start file sorts out everything it needs, including Python
+itself if your computer does not already have it. Nothing is installed
 system-wide, nothing asks for your password, and nothing changes your computer's
-settings: it all stays inside the folder you unzipped. (On Linux it is one
-command in a terminal rather than a double-click; see step 3.)
+settings: it all stays inside the app's own folder. (One place needs a terminal:
+on Linux the start file is a command rather than a double-click. It is in
+step 3.)
 
-**1. Download** — go to the app's page on GitHub:
-<https://github.com/sokodm/position-size-calculator>. Click the green **Code**
-button near the top right, then **Download ZIP**.
+**1. Get the files**
 
-**2. Unzip**
+- **Mac** — install **GitHub Desktop** from <https://desktop.github.com>, open
+  it, and skip the sign-in if it offers one — a public app needs no account.
+  Choose **File → Clone Repository…**, click the **URL** tab, paste
+  `https://github.com/sokodm/position-size-calculator` and click **Clone**.
 
-- **Mac** — double-click the ZIP file.
+  Use this rather than Download ZIP. macOS refuses to open files that came out
+  of a downloaded ZIP and gives you no way to click past it; files arriving
+  through GitHub Desktop are never flagged, so the app simply opens. Updating
+  later is one click, and it leaves your saved positions alone.
+
+- **Windows** and **Linux** — go to the app's page on GitHub:
+  <https://github.com/sokodm/position-size-calculator>. Click the green **Code**
+  button near the top right, then **Download ZIP**.
+
+**2. Unzip** — only if you downloaded a ZIP; GitHub Desktop hands Mac a folder
+that is ready to use.
+
+- **Mac** — double-click the ZIP file. macOS will then block the start file, so
+  read [Mac: if you used Download ZIP](#mac-if-you-used-download-zip) before
+  step 3.
 - **Windows** — right-click the ZIP file → **Extract All…** → **Extract**.
   Do not skip this: double-clicking a ZIP on Windows only previews it, and the
   app cannot run from a preview.
 - **Linux** — double-click the ZIP file, or run
   `unzip position-size-calculator-main.zip` in a terminal.
 
-**3. Start it** — open the unzipped folder and start the file for your system:
+**3. Start it** — open the app's folder and start the file for your system:
 
 - **Mac** — `Start Calculator (Mac).command`
+
+  GitHub Desktop puts the folder in `Documents/GitHub/position-size-calculator`
+  unless you picked somewhere else. Double-click the start file; nothing blocks
+  it. (If you took the ZIP route anyway, see [Mac: if you used Download
+  ZIP](#mac-if-you-used-download-zip) below.)
+
 - **Windows** — `Start Calculator (Windows).bat`
 - **Linux** — open a terminal in the folder and run:
 
@@ -77,11 +99,34 @@ private copy (24 MB on Mac, 45 MB on Windows, 33 MB on Linux) into the folder
 before carrying on. You do not have to do anything — it is just why the
 very first start can take a little longer.
 
+### Mac: if you used Download ZIP
+
+The ZIP still works, but macOS will refuse to open the start file the first
+time: *"Apple could not verify 'Start Calculator (Mac).command' is free of
+malware."* That is not about this app — macOS flags every file that came out of
+a downloaded ZIP, whoever wrote it, and the dialog deliberately offers no way
+through. Cloning with GitHub Desktop (step 1) avoids it entirely.
+
+Click **Done** — do **not** click *Move to Trash* — then:
+
+1. Open **System Settings → Privacy & Security**.
+2. Scroll down to **Security**. A line names the blocked file, with an **Open
+   Anyway** button beside it.
+3. Click **Open Anyway**, then confirm.
+
+That button only appears for a short while after the block, so do it straight
+away; if it has gone, double-click the start file again to bring it back. The
+first time it runs, the start file clears the flag from the whole folder, so
+this is a one-time thing rather than something you repeat.
+
+Right-click → **Open** was the old fix for this. macOS 15 (Sequoia) removed it,
+which is why it no longer does anything.
+
 ### If it does not start
 
 | Message | Fix |
 |---|---|
-| Mac: "unidentified developer" | Right-click `Start Calculator (Mac).command` → **Open** → **Open**. Once only. |
+| Mac: "Apple could not verify… is free of malware", or "unidentified developer" | The files came out of a downloaded ZIP. Click **Done** — *not* **Move to Trash** — then follow [Mac: if you used Download ZIP](#mac-if-you-used-download-zip). Getting the files with GitHub Desktop instead (step 1) avoids the block altogether. |
 | Windows: "Windows protected your PC" | Click **More info** → **Run anyway**. Once only. |
 | Window opens and closes without the browser opening | On Windows the window closing is normal once the app has started — this row is about it closing with no browser tab. Usually the app is being run from inside the ZIP preview: extract the folder properly (step 2). If it is extracted and still closes, see **Windows: getting a diagnosis** below. |
 | Anything about Python failing to download | Check your internet connection and try again. If it keeps failing, install Python by hand — see [Installing Python](#installing-python). |
