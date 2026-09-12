@@ -3,12 +3,22 @@
 Auto-calculated ATR sets your stop price and position size — capping your loss
 on any trade at the risk % you set.
 
-> **Not financial advice.** This is a calculator, not a recommendation. It tells
-> you what a position size *would* be under the risk rule you gave it; it has no
-> opinion on whether the trade is a good one. Market data comes from a
-> third-party source and may be delayed, wrong, or missing. You are responsible
-> for every order you place. The software comes with no warranty of any kind —
-> see [LICENSE](LICENSE).
+> **Not financial advice. Use at your own risk.** This is a calculator, not a
+> recommendation, and not investment, financial, tax, or legal advice. It
+> tells you what a position size *would* be under the risk rule you gave it;
+> it has no opinion on whether the trade is a good one, and no relationship
+> with you is created by using it — the author is not your broker, advisor,
+> or fiduciary. Market data comes from a third-party source and may be
+> delayed, wrong, incomplete, or missing; nothing here is verified against a
+> broker's live quote before you act on it. Trading and investing carry a
+> real risk of loss, including total loss of principal, regardless of what
+> any calculator outputs. You are solely responsible for every order you
+> place and for independently verifying all numbers before you rely on them.
+> **The software is provided "AS IS," with no warranty of any kind, and to
+> the maximum extent permitted by law the author accepts no liability for
+> any loss or damage — financial or otherwise — arising from its use or from
+> errors, downtime, or inaccurate data.** See [LICENSE](LICENSE) for the full
+> terms.
 
 ![The calculator with three crypto positions loaded. Portfolio size and risk
 percentage sit in the left sidebar; the highlighted Stop Price, Position Size
