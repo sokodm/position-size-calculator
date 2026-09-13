@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """One-command launcher for the Position Size Calculator (Mac, Windows, Linux).
 
-Creates a private virtual environment beside this file, installs the pinned
+Creates a private virtual environment (beside this file on Mac/Linux; see
+venv_dir() for why Windows keeps it elsewhere), installs the pinned
 dependencies, starts Streamlit on a free port and opens the browser. Safe to
 re-run: the install is skipped unless requirements.txt actually changed.
 
@@ -38,7 +39,33 @@ STARTUP_TIMEOUT_S = 120
 HERE = Path(__file__).resolve().parent
 APP = HERE / "app.py"
 REQUIREMENTS = HERE / "requirements.txt"
-VENV = HERE / ".venv"
+
+
+def venv_dir() -> Path:
+    """Where the private virtual environment lives.
+
+    Beside this file everywhere except Windows, which enforces a ~260-
+    character path limit that this app's own dependencies can exceed with
+    room to spare: pip's install step unpacks its own vendored license tree
+    (.venv\\Lib\\site-packages\\pip-*.dist-info\\licenses\\src\\pip\\_vendor\\...),
+    and that alone is over 60 characters before HERE contributes a single
+    one. HERE is normally short, but a GitHub branch ZIP is named
+    <repo>-<branch>, and Windows Explorer's "Extract All" then nests that
+    folder inside another one of the same name -- so a moderately long
+    branch name is enough on its own to blow the budget, with no unusually
+    deep placement required. Keying by a hash of HERE keeps one venv per
+    project copy (matching the old beside-this-file behavior, including a
+    fresh install if that copy is later moved -- its hash changes too) while
+    living somewhere short and length-immune instead.
+    """
+    if os.name != "nt":
+        return HERE / ".venv"
+    key = hashlib.sha256(str(HERE).encode()).hexdigest()[:16]
+    base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+    return base / "PSC" / "venvs" / key
+
+
+VENV = venv_dir()
 # Written only after a clean install, so an install that dies halfway is
 # retried on the next run instead of being remembered as done.
 STAMP = VENV / ".deps-stamp"

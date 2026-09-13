@@ -33,7 +33,19 @@ set "PY_VERSION=3.12.14"
 set "PY_BUILD=20260901"
 set "PY_TRIPLE=x86_64-pc-windows-msvc"
 set "PY_SHA256=e90c1b6419da3bd812dd73bb3de40287a21abf153438147639ec5e20375ea93f"
-set "RUNTIME_DIR=%~dp0.runtime"
+REM Kept outside this folder, not beside it: python-build-standalone's own
+REM Lib\site-packages tree is nested deep enough that combining it with an
+REM arbitrarily long/nested project path can exceed Windows' ~260-character
+REM limit (the same OSError [WinError 206] this download exists to work
+REM around in the first place -- see run.py's venv_dir() for the matching
+REM fix on the venv side). LOCALAPPDATA is short and stable regardless of
+REM where this ZIP was extracted, and every copy of this app shares one
+REM download since the runtime itself holds no project-specific packages.
+if defined LOCALAPPDATA (
+    set "RUNTIME_DIR=%LOCALAPPDATA%\PSC\runtime"
+) else (
+    set "RUNTIME_DIR=%~dp0.runtime"
+)
 set "RUNTIME_PY=%RUNTIME_DIR%\python\python.exe"
 set "STAGING=%RUNTIME_DIR%\.download"
 set "PY_ARCHIVE=cpython-%PY_VERSION%+%PY_BUILD%-%PY_TRIPLE%-install_only.tar.gz"
