@@ -3302,7 +3302,7 @@ with st.container(key="symbol_check_results"):
         # that has not been committed yet, and the action it asks for is the
         # same either way.
         ready = False
-        add_help = "Press Enter in the Symbol field (or click Search) to verify a symbol first"
+        add_help = "Search for a symbol first"
     elif not check["matches"]:
         upstream_issues = [e for e in check.get("errors", {}).values() if e and e.get("retryable")]
         if upstream_issues:
