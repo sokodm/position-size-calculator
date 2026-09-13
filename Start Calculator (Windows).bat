@@ -129,22 +129,59 @@ echo administrator password is needed.
 echo.
 
 :provision_download
+REM Set before the staging check below, not after -- %DOWNLOAD_ATTEMPTS% is read
+REM by the :download_failed message, and that label is also reached directly
+REM from a failed mkdir a few lines down, before any later "set" would run.
+REM A one-off network hiccup or a corrupted-in-transit download shouldn't send
+REM someone straight to "install Python by hand" -- that message is for when
+REM retrying can't help, not for the common transient case. -TimeoutSec caps
+REM how long a stalled connection hangs before counting as a failed attempt.
+set "DOWNLOAD_ATTEMPTS=3"
+set "ATTEMPT=0"
+
 if exist "%STAGING%" rd /s /q "%STAGING%"
 mkdir "%STAGING%" 2>nul
 if not exist "%STAGING%" goto download_failed
 
-call :log "downloading %PY_URL%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; try { Invoke-WebRequest -Uri '%PY_URL%' -OutFile '%STAGING%\%PY_ARCHIVE%' -UseBasicParsing } catch { Write-Host $_.Exception.Message; exit 1 }" >>"%LOG%" 2>&1
+:download_attempt
+set /a ATTEMPT+=1
+if "%ATTEMPT%"=="1" (
+    echo Downloading Python -- about 45 MB...
+) else (
+    echo Retrying download -- attempt %ATTEMPT% of %DOWNLOAD_ATTEMPTS%...
+)
+call :log "downloading %PY_URL% (attempt %ATTEMPT%/%DOWNLOAD_ATTEMPTS%)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; try { Invoke-WebRequest -Uri '%PY_URL%' -OutFile '%STAGING%\%PY_ARCHIVE%' -UseBasicParsing -TimeoutSec 60 } catch { Write-Host $_.Exception.Message; exit 1 }" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
-call :log "download -> exit %EL%"
-if not "%EL%"=="0" goto download_failed
-if not exist "%STAGING%\%PY_ARCHIVE%" goto download_failed
+call :log "download attempt %ATTEMPT% -> exit %EL%"
+if not "%EL%"=="0" goto download_retry
+if not exist "%STAGING%\%PY_ARCHIVE%" goto download_retry
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$h = (Get-FileHash -Algorithm SHA256 '%STAGING%\%PY_ARCHIVE%').Hash.ToLower(); if ($h -ne '%PY_SHA256%') { Write-Host ('  expected: %PY_SHA256%'); Write-Host ('  received: ' + $h); exit 1 }"
 set "EL=%errorlevel%"
-call :log "checksum -> exit %EL%"
-if not "%EL%"=="0" goto checksum_failed
+call :log "checksum attempt %ATTEMPT% -> exit %EL%"
+if not "%EL%"=="0" goto checksum_retry
+goto provision_unpack
 
+:download_retry
+if exist "%STAGING%\%PY_ARCHIVE%" del /f /q "%STAGING%\%PY_ARCHIVE%" 2>nul
+if "%ATTEMPT%" LSS "%DOWNLOAD_ATTEMPTS%" (
+    echo   That attempt failed -- retrying in 5 seconds...
+    timeout /t 5 /nobreak >nul
+    goto download_attempt
+)
+goto download_failed
+
+:checksum_retry
+del /f /q "%STAGING%\%PY_ARCHIVE%" 2>nul
+if "%ATTEMPT%" LSS "%DOWNLOAD_ATTEMPTS%" (
+    echo   That copy was corrupted in transit -- retrying in 5 seconds...
+    timeout /t 5 /nobreak >nul
+    goto download_attempt
+)
+goto checksum_failed
+
+:provision_unpack
 tar -xf "%STAGING%\%PY_ARCHIVE%" -C "%STAGING%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "tar -xf -> exit %EL%"
@@ -216,14 +253,19 @@ call :log "tar is not available"
 goto manual
 
 :download_failed
-echo The download failed. Check your internet connection and try again.
-call :log "download failed"
+echo.
+echo The download failed %DOWNLOAD_ATTEMPTS% times in a row. Check your internet
+echo connection and try again -- most failures are a one-off network issue and
+echo work on the next attempt.
+call :log "download failed after %DOWNLOAD_ATTEMPTS% attempts"
 goto manual
 
 :checksum_failed
-echo The downloaded Python does not match its expected checksum, so it will
-echo not be used.
-call :log "checksum mismatch"
+echo.
+echo The downloaded Python was corrupted in transit %DOWNLOAD_ATTEMPTS% times in a
+echo row, so it will not be used. This is usually a flaky connection -- try
+echo again, ideally on a more stable network.
+call :log "checksum mismatch after %DOWNLOAD_ATTEMPTS% attempts"
 goto manual
 
 :unpack_failed
