@@ -48,6 +48,10 @@ set "VERCHECK=import sys; sys.exit(0 if (3, 10) <= sys.version_info < (3, 14) el
 REM Defaults to failure, so a path that somehow reaches :done without setting
 REM it reports a problem rather than a silent success.
 set "RUN_STATUS=1"
+REM Set below whenever "py"/"python" is actually found but fails VERCHECK, so
+REM :provision can tell "no Python on this PC" apart from "a Python is here,
+REM just not a supported version" instead of blaming the PC for both.
+set "PY_FOUND_BUT_INCOMPATIBLE=0"
 
 REM A copy downloaded on an earlier run wins over the system Python: run.py's
 REM .venv is bound to whichever interpreter created it, so quietly switching
@@ -71,6 +75,7 @@ py -3 -c "%VERCHECK%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "py -3 version check -> exit %EL%"
 if "%EL%"=="0" goto use_py
+set "PY_FOUND_BUT_INCOMPATIBLE=1"
 
 :try_python
 where python >nul 2>nul
@@ -81,6 +86,7 @@ python -c "%VERCHECK%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "python version check -> exit %EL%"
 if "%EL%"=="0" goto use_python
+set "PY_FOUND_BUT_INCOMPATIBLE=1"
 
 :provision
 call :log "no usable Python found -- provisioning a private copy"
@@ -89,11 +95,21 @@ set "EL=%errorlevel%"
 call :log "where tar -> exit %EL%"
 if not "%EL%"=="0" goto no_tar
 
+if "%PY_FOUND_BUT_INCOMPATIBLE%"=="1" goto provision_incompatible
 echo This PC does not have Python, so the app will download its own copy
 echo (about 45 MB). It goes in this folder only -- nothing is installed
 echo system-wide, and no administrator password is needed.
 echo.
+goto provision_download
 
+:provision_incompatible
+echo This PC has a Python installed, but not a version this app supports
+echo (3.10 to 3.13), so it will download its own copy instead (about 45 MB).
+echo It goes in this folder only -- nothing is installed system-wide, and no
+echo administrator password is needed.
+echo.
+
+:provision_download
 if exist "%STAGING%" rd /s /q "%STAGING%"
 mkdir "%STAGING%" 2>nul
 if not exist "%STAGING%" goto download_failed

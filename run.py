@@ -234,6 +234,26 @@ def startup_detail(capture: Path | None) -> str:
     return kept + "Streamlit's last output:\n" + "\n".join(said.splitlines()[-40:])
 
 
+def open_browser(url: str) -> None:
+    """Best-effort browser launch that keeps the window open if it fails.
+
+    webbrowser.open() returns False rather than raising on a silent failure
+    (no registered default browser, a corporate policy, a first-run security
+    prompt), and on Windows the launcher closes this window the instant
+    run.py exits. A silent failure here would leave the user with no way to
+    read the URL already printed above before the window vanished, so this
+    blocks on input() -- but only in that case, leaving the common path
+    (open() succeeds) exactly as fast as before.
+    """
+    try:
+        opened = webbrowser.open(url)
+    except OSError:
+        opened = False
+    if not opened:
+        print(f"  Could not open a browser automatically -- open {url} manually.")
+        input("  Press Enter to close this window.\n")
+
+
 def wait_until_serving(process: subprocess.Popen, port: int,
                        capture: Path | None = None) -> None:
     deadline = time.monotonic() + STARTUP_TIMEOUT_S
@@ -280,7 +300,7 @@ def main() -> None:
             url = f"http://localhost:{running}"
             print(f"\n  Position Size Calculator is already running at {url}")
             print("  Opening it in your browser.\n")
-            webbrowser.open(url)
+            open_browser(url)
             return
 
     python = ensure_environment()
@@ -359,7 +379,7 @@ def main() -> None:
     print(f"\n  Position Size Calculator is running at {url}")
     print("  It keeps running in the background -- this window can close now.")
     print("  Your positions are saved in this folder, in positions.json.\n")
-    webbrowser.open(url)
+    open_browser(url)
 
 
 if __name__ == "__main__":
