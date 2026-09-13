@@ -87,7 +87,13 @@ py -3 -c "%VERCHECK%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "py -3 version check -> exit %EL%"
 if "%EL%"=="0" goto use_py
-set "PY_FOUND_BUT_INCOMPATIBLE=1"
+REM 9009 is not "a real interpreter that's the wrong version" -- it's the exit
+REM code Windows' own Python "App Execution Alias" stub uses for "not really
+REM installed, run me with no args to get the Store page instead". Counting
+REM it as PY_FOUND_BUT_INCOMPATIBLE produced exactly the message a user hit in
+REM practice: "This PC has a Python installed, but not a version this app
+REM supports", when there was no real Python at all.
+if not "%EL%"=="9009" set "PY_FOUND_BUT_INCOMPATIBLE=1"
 
 :try_python
 where python >nul 2>nul
@@ -98,7 +104,8 @@ python -c "%VERCHECK%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "python version check -> exit %EL%"
 if "%EL%"=="0" goto use_python
-set "PY_FOUND_BUT_INCOMPATIBLE=1"
+REM Same Store-alias-stub exception as the py -3 check above.
+if not "%EL%"=="9009" set "PY_FOUND_BUT_INCOMPATIBLE=1"
 
 :provision
 call :log "no usable Python found -- provisioning a private copy"
