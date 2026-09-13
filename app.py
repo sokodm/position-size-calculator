@@ -1837,9 +1837,21 @@ st.markdown(
     [data-testid="stHeaderActionElements"] a {
         display: none !important;
     }
+    /* flex/min-width here, not just alignment: this column sits at a 1-of-10
+       share of the row (st.columns([9, 1])), which at a narrow window shrinks
+       past the button's own rendered width. The button's fixed min-width
+       (below) then refuses to shrink with it and overflows the column
+       boundary, rendering on top of the caption text next to it instead of
+       wrapping inside its own column -- reported live as the CSV button
+       overlapping the "double-click to edit" help text on resize. Sizing the
+       column to its content, the same fix already used for every other
+       button's column below, gives the button somewhere to actually fit so
+       the caption column (which does wrap) absorbs the squeeze instead. */
     [data-testid="stColumn"]:has([data-testid="stDownloadButton"]) {
         display: flex;
         justify-content: flex-end;
+        flex: 0 0 auto !important;
+        min-width: fit-content !important;
     }
     [data-testid="stColumn"]:has([data-testid="stDownloadButton"]) [data-testid="stVerticalBlock"] {
         align-items: flex-end;
