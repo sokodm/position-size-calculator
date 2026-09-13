@@ -90,7 +90,7 @@ jobs:
           call "Start Calculator (Windows).bat" < nul > out.txt 2>&1
           type out.txt
           findstr /C:"RUNPY_VERSION=3." out.txt > nul || exit /b 1
-          if exist .runtime exit /b 1
+          if exist "%LOCALAPPDATA%\PSC\runtime" exit /b 1
 
       - name: Windows -- downloads its own Python when the machine has none
         # A runner always has Python, and it cannot be hidden with a PATH shim:
@@ -107,8 +107,8 @@ jobs:
           call nopython.bat < nul > out2.txt 2>&1
           type out2.txt
           findstr /C:"RUNPY_VERSION=3.12.14" out2.txt > nul || exit /b 1
-          findstr /C:".runtime" out2.txt > nul || exit /b 1
-          if exist .runtime\.download exit /b 1
+          findstr /C:"PSC\runtime" out2.txt > nul || exit /b 1
+          if exist "%LOCALAPPDATA%\PSC\runtime\.download" exit /b 1
 
       - name: Pinned Python hashes still match the published release
         # macos-latest is Apple Silicon and GitHub has retired its Intel macOS

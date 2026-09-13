@@ -270,7 +270,9 @@ def open_browser(url: str) -> None:
     run.py exits. A silent failure here would leave the user with no way to
     read the URL already printed above before the window vanished, so this
     blocks on input() -- but only in that case, leaving the common path
-    (open() succeeds) exactly as fast as before.
+    (open() succeeds) exactly as fast as before. Only when stdin is a real
+    terminal, though: a headless/CI invocation has no one to press Enter, and
+    input() there raises EOFError instead of blocking.
     """
     try:
         opened = webbrowser.open(url)
@@ -278,7 +280,11 @@ def open_browser(url: str) -> None:
         opened = False
     if not opened:
         print(f"  Could not open a browser automatically -- open {url} manually.")
-        input("  Press Enter to close this window.\n")
+        if sys.stdin.isatty():
+            try:
+                input("  Press Enter to close this window.\n")
+            except EOFError:
+                pass
 
 
 def wait_until_serving(process: subprocess.Popen, port: int,
