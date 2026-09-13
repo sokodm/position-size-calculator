@@ -145,11 +145,8 @@ if not exist "%STAGING%" goto download_failed
 
 :download_attempt
 set /a ATTEMPT+=1
-if "%ATTEMPT%"=="1" (
-    echo Downloading Python -- about 45 MB...
-) else (
-    echo Retrying download -- attempt %ATTEMPT% of %DOWNLOAD_ATTEMPTS%...
-)
+if "%ATTEMPT%"=="1" echo Downloading Python -- about 45 MB...
+if not "%ATTEMPT%"=="1" echo Retrying download -- attempt %ATTEMPT% of %DOWNLOAD_ATTEMPTS%...
 call :log "downloading %PY_URL% (attempt %ATTEMPT%/%DOWNLOAD_ATTEMPTS%)"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; try { Invoke-WebRequest -Uri '%PY_URL%' -OutFile '%STAGING%\%PY_ARCHIVE%' -UseBasicParsing -TimeoutSec 60 } catch { Write-Host $_.Exception.Message; exit 1 }" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
@@ -165,21 +162,17 @@ goto provision_unpack
 
 :download_retry
 if exist "%STAGING%\%PY_ARCHIVE%" del /f /q "%STAGING%\%PY_ARCHIVE%" 2>nul
-if "%ATTEMPT%" LSS "%DOWNLOAD_ATTEMPTS%" (
-    echo   That attempt failed -- retrying in 5 seconds...
-    timeout /t 5 /nobreak >nul
-    goto download_attempt
-)
-goto download_failed
+if "%ATTEMPT%"=="%DOWNLOAD_ATTEMPTS%" goto download_failed
+echo   That attempt failed -- retrying in 5 seconds...
+timeout /t 5 /nobreak >nul
+goto download_attempt
 
 :checksum_retry
 del /f /q "%STAGING%\%PY_ARCHIVE%" 2>nul
-if "%ATTEMPT%" LSS "%DOWNLOAD_ATTEMPTS%" (
-    echo   That copy was corrupted in transit -- retrying in 5 seconds...
-    timeout /t 5 /nobreak >nul
-    goto download_attempt
-)
-goto checksum_failed
+if "%ATTEMPT%"=="%DOWNLOAD_ATTEMPTS%" goto checksum_failed
+echo   That copy was corrupted in transit -- retrying in 5 seconds...
+timeout /t 5 /nobreak >nul
+goto download_attempt
 
 :provision_unpack
 tar -xf "%STAGING%\%PY_ARCHIVE%" -C "%STAGING%" >>"%LOG%" 2>&1
