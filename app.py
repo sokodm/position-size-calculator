@@ -96,6 +96,21 @@ GRID_ROW_HEIGHT = 42
 # against this; a grid that renders no horizontal scroll widget has not been
 # checked and should not assume the same 3px.
 GRID_CHROME_HEIGHT = 3
+# Real clearance for the horizontal scroll widget itself, which the
+# .ag-body-horizontal-scroll rule in GRID_CSS pins to `bottom: 0` of the grid's
+# fixed-height wrapper via `position: absolute`. Zero clearance put that bottom
+# edge exactly at the last row's own bottom edge, so on classic scrollbars
+# (Windows, Linux) -- always-on and opaque -- the widget rendered on top of the
+# last row instead of below it. 18px matches the exact shortfall measured
+# pre-fix on Linux (a 126px-tall body squeezed into a 108px viewport once the
+# widget claimed real flex space -- see docs/superpowers/plans/2026-09-08-linux-support.md);
+# reserving that same amount now, unconditionally, gives the widget somewhere
+# to sit that is not on top of content. macOS's overlay/"apple" scrollbar is
+# also forced into classic always-visible rendering (see the
+# .ag-body-horizontal-scroll.ag-apple-scrollbar and ::-webkit-scrollbar* rules
+# in GRID_CSS below), so this clearance is load-bearing there too, not just a
+# cosmetic strip for an idle overlay.
+GRID_SCROLLBAR_CLEARANCE = 18
 
 SHOW_LAST_REFRESH_CHANGES = False
 
@@ -1822,9 +1837,21 @@ st.markdown(
     [data-testid="stHeaderActionElements"] a {
         display: none !important;
     }
+    /* flex/min-width here, not just alignment: this column sits at a 1-of-10
+       share of the row (st.columns([9, 1])), which at a narrow window shrinks
+       past the button's own rendered width. The button's fixed min-width
+       (below) then refuses to shrink with it and overflows the column
+       boundary, rendering on top of the caption text next to it instead of
+       wrapping inside its own column -- reported live as the CSV button
+       overlapping the "double-click to edit" help text on resize. Sizing the
+       column to its content, the same fix already used for every other
+       button's column below, gives the button somewhere to actually fit so
+       the caption column (which does wrap) absorbs the squeeze instead. */
     [data-testid="stColumn"]:has([data-testid="stDownloadButton"]) {
         display: flex;
         justify-content: flex-end;
+        flex: 0 0 auto !important;
+        min-width: fit-content !important;
     }
     [data-testid="stColumn"]:has([data-testid="stDownloadButton"]) [data-testid="stVerticalBlock"] {
         align-items: flex-end;
@@ -3302,7 +3329,7 @@ with st.container(key="symbol_check_results"):
         # that has not been committed yet, and the action it asks for is the
         # same either way.
         ready = False
-        add_help = "Press Enter in the Symbol field (or click Search) to verify a symbol first"
+        add_help = "Search for a symbol first"
     elif not check["matches"]:
         upstream_issues = [e for e in check.get("errors", {}).values() if e and e.get("retryable")]
         if upstream_issues:
@@ -3682,125 +3709,8 @@ else:
     # count. A 0-width viewport (not laid out yet at the 50ms mark) must retry,
     # not proceed -- proceeding takes the lock-everything branch by accident.
 
-    # When the window is too narrow for every column, the table just scrolls --
-    # and on a trackpad with overlay scroll bars there is nothing on screen
-    # saying so, which is how a reader concludes the columns to the right do not
-    # exist. This puts a round chevron on each border of the table, centred
-    # vertically, each one showing whenever there are columns hidden that way.
-    # Text was tried there first and read as part of whatever it sat next to
-    # ("Tranche Size ($)" plus a "more" pill scans as one label); an icon on the
-    # edge it points at does not.
-    #
-    # Every handler below re-evaluates the same condition, so the body is
-    # installed on window once and they all call it: each JsCode is eval'd as
-    # an independent function and cannot otherwise share a definition.
-    #
-    # The argument splits the cheap half from the expensive one. Only a resize
-    # or a re-render can move a row, and the vertical placement below measures
-    # every row to find one -- so a horizontal scroll, which fires many times a
-    # second and cannot change any row's top, asks for the visibility half
-    # alone. Measuring on every tick forced a reflow per row per event.
-    _MORE_HINT_INSTALL_JS = (
-        "if (!window.pscSyncMoreHint) { window.pscSyncMoreHint = function(remeasure){ "
-        "var vp = document.querySelector('.ag-center-cols-viewport'); "
-        "if (!vp) { return; } "
-        "var wrapper = vp.closest('.ag-root-wrapper'); "
-        "if (!wrapper) { return; } "
-        # One builder for both, so the two buttons cannot drift apart in size,
-        # colour or scroll step -- only the direction differs.
-        "var build = function(cls, points, dir, label){ "
-        "var el = wrapper.querySelector('.' + cls); "
-        "if (el) { return el; } "
-        "el = document.createElement('div'); "
-        "el.className = 'psc-scroll-hint ' + cls; "
-        "el.title = label; "
-        "el.setAttribute('role', 'button'); "
-        "el.setAttribute('aria-label', label); "
-        # Announced as a button, so it has to work like one: a bare div with
-        # role=button is not in the tab order and Enter/Space do nothing on it.
-        # tabIndex is set here for the case where the element is built already
-        # visible, and re-set by show() below on every state change.
-        "el.tabIndex = -1; "
-        # An SVG rather than a "›" glyph: the chevron characters render at
-        # wildly different sizes and baselines across fonts, so a text one
-        # cannot be reliably centred in a 20px circle.
-        "el.innerHTML = '<svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" "
-        "fill=\"none\" stroke=\"#5a6270\" stroke-width=\"3.5\" "
-        "stroke-linecap=\"round\" stroke-linejoin=\"round\">"
-        "<polyline points=\"' + points + '\"></polyline></svg>'; "
-        # A round chevron reads as a control, so it behaves like one. The
-        # viewport is re-queried on each click rather than captured: ag-Grid
-        # rebuilds these nodes on a column change, and a stale reference would
-        # scroll a detached element. It mirrors the header and pinned viewports
-        # off this one's scroll event, so setting scrollLeft is the whole job.
-        "var scroll = function(){ "
-        "var v = document.querySelector('.ag-center-cols-viewport'); "
-        "if (v) { v.scrollLeft += dir * v.clientWidth * 0.8; } }; "
-        "el.addEventListener('click', scroll); "
-        # Space would scroll the page as well without the preventDefault, so
-        # one keypress would move both the table and the document.
-        "el.addEventListener('keydown', function(e){ "
-        "if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { "
-        "e.preventDefault(); scroll(); } }); "
-        "wrapper.appendChild(el); "
-        "return el; "
-        "}; "
-        "var next = build('psc-more-cols', '9 5 16 12 9 19', 1, "
-        "'Scroll right for more columns'); "
-        "var prev = build('psc-prev-cols', '15 5 8 12 15 19', -1, "
-        "'Scroll left for earlier columns'); "
-        # Mid-table vertically, but snapped to the nearest gap BETWEEN rows
-        # rather than the literal 50%. The circles are 20px on a 42px row, so
-        # sitting in a row's middle puts them over that row's figures -- with
-        # the numbers left-aligned, the left-hand one was measured covering 22
-        # of the 30px of a "7.88". A row boundary is the one horizontal strip
-        # with no text in it, because a 42px row centres roughly 14px of
-        # glyphs. The move is a few pixels and reads as the middle either way.
-        # Measured, not derived from GRID_ROW_HEIGHT: a wrapped header or a
-        # theme that rounds row heights would put a computed offset back inside
-        # the text. The header/first-row boundary counts as a candidate so that
-        # a one-position table still gets a real gap -- it overflows just the
-        # same, and 50% of a header plus one row lands in that row's digits.
-        # With more rows the nearest-to-middle test never picks it anyway. The
-        # boundary below the LAST row is excluded: the circle would hang half
-        # outside the grid, where it gets clipped.
-        "var rows = remeasure ? wrapper.querySelectorAll("
-        "'.ag-center-cols-container .ag-row') : []; "
-        "if (rows.length > 0) { "
-        "var wb = wrapper.getBoundingClientRect(); "
-        "var mid = wb.height / 2, best = null; "
-        "for (var i = 0; i < rows.length; i++) { "
-        "var edge = rows[i].getBoundingClientRect().top - wb.top; "
-        "if (best === null || Math.abs(edge - mid) < Math.abs(best - mid)) { "
-        "best = edge; } "
-        "} "
-        "next.style.top = best + 'px'; "
-        "prev.style.top = best + 'px'; "
-        "} "
-        # Fractional column widths leave scrollWidth a fraction above
-        # clientWidth on a table that fits perfectly well, so a bare "> 0"
-        # would leave the right-hand chevron showing permanently on a maximised
-        # window. The left one uses the same tolerance for symmetry.
-        # Hidden has to mean gone from the accessibility tree and the tab order
-        # too, not merely transparent: both circles stay in the DOM at every
-        # window width, so a screen reader or a Tab key would otherwise reach
-        # two buttons that scroll nothing.
-        "var show = function(el, on){ "
-        "el.classList.toggle('psc-visible', on); "
-        "el.setAttribute('aria-hidden', on ? 'false' : 'true'); "
-        "el.tabIndex = on ? 0 : -1; "
-        "}; "
-        "var hidden = vp.scrollWidth - vp.clientWidth - vp.scrollLeft; "
-        "show(next, hidden > 2); "
-        "show(prev, vp.scrollLeft > 2); "
-        "}; } "
-    )
-    _MORE_HINT_JS = JsCode(
-        "function(params){ " + _MORE_HINT_INSTALL_JS + "window.pscSyncMoreHint(); }"
-    )
     _FIT_COLUMNS_JS = JsCode(
         "function(params){ "
-        + _MORE_HINT_INSTALL_JS +
         "var attempt = function(tries){ "
         "var FILLER = 'Exchange'; "
         "var visible = params.api.getColumnState().filter(function(s){ return !s.hide; }); "
@@ -3826,10 +3736,6 @@ else:
         "limits.push({key: FILLER, minWidth: fillerNatural, maxWidth: fillerNatural}); "
         "} "
         "params.api.sizeColumnsToFit({columnLimits: limits}); "
-        # Deferred a tick: the widths above are applied to the DOM before the
-        # browser recomputes scrollWidth, so reading it here still returns the
-        # pre-resize value and the hint would lag one resize behind.
-        "setTimeout(function(){ window.pscSyncMoreHint(true); }, 0); "
         "}; "
         "setTimeout(function(){ attempt(5); }, 50); }"
     )
@@ -3884,9 +3790,6 @@ else:
         includeHiddenColumnsInQuickFilter=True,
         onFirstDataRendered=_FIT_COLUMNS_JS,
         onGridSizeChanged=_FIT_COLUMNS_JS,
-        # Scrolling is the one thing that changes how much is still hidden
-        # without changing any column width, so it needs its own handler.
-        onBodyScroll=_MORE_HINT_JS,
     )
     grid_options = gb.build()
 
@@ -3947,70 +3850,52 @@ else:
         # so the viewport shrinks by 15px inside an iframe whose height is
         # already fixed at grid_height and the last row is sliced in half.
         # Measured on Debian 12 / Chromium 152 at a 500px width: viewport 108
-        # against 126px of rows, 18 of the last row's 42 pixels cut off.  macOS
+        # against 126px of rows, 18 of the last row's 42 pixels cut off. macOS
         # overlay scrollbars do not hit this -- ag-Grid detects them and sets
         # this widget position:absolute itself. Doing the same unconditionally
         # takes the bar out of flow everywhere, which restored the viewport to
         # 123 (the macOS number exactly) and costs macOS nothing.
+        # Taking it out of flow alone just relocates the problem: pinned to
+        # `bottom: 0` of a wrapper with no spare height, the widget then sits
+        # ON TOP of the last row instead of clipping it -- opaque and always-on
+        # on Windows/Linux, so it visibly overlapped that row's content.
+        # GRID_SCROLLBAR_CLEARANCE reserves the widget's own height in
+        # grid_height so `bottom: 0` lands below the last row instead.
         ".ag-body-horizontal-scroll": {
             "position": "absolute !important",
             "bottom": "0",
             "left": "0",
             "right": "0",
         },
-        # Built and toggled by _MORE_HINT_INSTALL_JS above. Absolutely
-        # positioned inside .ag-root-wrapper (already position:relative) so the
-        # pair costs no layout height -- grid_height below stays exactly a
-        # header plus its rows, which is what keeps the last row from clipping.
-        # Each is centred on the border it points at: a white disc with a grey
-        # rim. The chevron's #5a6270 on white measures about 6:1, well past the
-        # 3:1 WCAG 1.4.11 asks of a graphical control.
-        ".psc-scroll-hint": {
-            "position": "absolute",
-            "top": "50%",
-            "transform": "translateY(-50%)",
-            "display": "flex",
-            "align-items": "center",
-            "justify-content": "center",
-            "width": "20px",
-            "height": "20px",
-            "border-radius": "50%",
-            "background": "#ffffff",
-            # The rim is load-bearing, not decoration: an all-white disc on
-            # white cells has no edge at all, and the grey also stops the cell
-            # and header borders underneath from appearing to run through it.
-            # #c2c2c2 is the same grey as the grid's own cell borders.
-            # A box-shadow ring rather than a border, so the rim does not
-            # enlarge the 20px box the chevron is centred in.
-            "box-shadow": "0 0 0 1px #c2c2c2, 0 1px 3px rgba(0,0,0,0.14)",
-            "cursor": "pointer",
-            "z-index": "20",
-            "opacity": "0",
-            "transition": "opacity 120ms ease",
-            # Invisible has to mean non-interactive as well: on a window wide
-            # enough to show every column the circles are still in the DOM, and
-            # without this they would keep swallowing clicks on the cells under
-            # them.
-            "pointer-events": "none",
+        # macOS additionally tags this widget .ag-apple-scrollbar and fades it
+        # to opacity:0/visibility:hidden except while .ag-scrollbar-scrolling
+        # or .ag-scrollbar-active, replicating the OS's own auto-hiding
+        # overlay scrollbar -- so at rest it reads as "missing" rather than
+        # "there but idle". GRID_SCROLLBAR_CLEARANCE already reserves it real
+        # space below the last row, so there is no longer a reason to hide
+        # it; !important is required to beat ag-Grid's own rule for this
+        # class regardless of stylesheet injection order.
+        ".ag-body-horizontal-scroll.ag-apple-scrollbar": {
+            "opacity": "1 !important",
+            "visibility": "visible !important",
         },
-        # One condition only: psc-visible says there are columns hidden that
-        # way, measured in _MORE_HINT_INSTALL_JS. Deliberately NOT also gated
-        # on hovering the table -- the hint exists for a reader who does not
-        # know the table scrolls, and one they have to find by pointing at it
-        # cannot tell them that.
-        ".psc-scroll-hint.psc-visible": {
-            "opacity": "1",
-            "pointer-events": "auto",
+        # The rule above only keeps ag-Grid's own wrapper div visible -- the
+        # scrollbar THUMB drawn inside it is the browser's native one, which
+        # on macOS is a self-hiding overlay drawn by the OS/engine, not
+        # something opacity/visibility on a parent div can reach. Chromium
+        # switches a scrollable element to classic (always-track, always-
+        # thumb) rendering the moment any ::-webkit-scrollbar* pseudo-element
+        # is styled on it, which is what actually makes it stay visible.
+        ".ag-body-horizontal-scroll-viewport::-webkit-scrollbar": {
+            "height": "10px !important",
         },
-        # These are in the tab order while visible, so they need a focus ring,
-        # and the disc already spends its box-shadow on the rim. An outline
-        # draws outside the box and does not compete with it.
-        ".psc-scroll-hint:focus-visible": {
-            "outline": "2px solid #1f6feb",
-            "outline-offset": "2px",
+        ".ag-body-horizontal-scroll-viewport::-webkit-scrollbar-track": {
+            "background-color": "transparent !important",
         },
-        ".psc-more-cols": {"right": "6px"},
-        ".psc-prev-cols": {"left": "6px"},
+        ".ag-body-horizontal-scroll-viewport::-webkit-scrollbar-thumb": {
+            "background-color": "#c1c1c1 !important",
+            "border-radius": "5px !important",
+        },
     }
 
     # height=None (domLayout: autoHeight) relies on the component calling back
@@ -4020,12 +3905,13 @@ else:
     # the whole table renders blank. Passing an explicit pixel height sized to
     # the row count sidesteps that broken callback while still avoiding
     # leftover empty space below a short table.
-    # No buffer is added for the horizontal scroll bar itself: the
-    # .ag-body-horizontal-scroll rule in GRID_CSS takes it out of flow on every
-    # platform, so it never claims layout height. GRID_CHROME_HEIGHT covers what
-    # is left -- ag-Grid's header overshoot and the gaps around that widget.
+    # GRID_CHROME_HEIGHT covers ag-Grid's header overshoot and the gaps around
+    # the horizontal scroll widget; GRID_SCROLLBAR_CLEARANCE reserves the
+    # widget's own height below the last row so it has somewhere to render
+    # that is not on top of that row -- see its definition for the measurement.
     grid_height = (
-        GRID_HEADER_HEIGHT + GRID_ROW_HEIGHT * len(df) + GRID_CHROME_HEIGHT
+        GRID_HEADER_HEIGHT + GRID_ROW_HEIGHT * len(df)
+        + GRID_CHROME_HEIGHT + GRID_SCROLLBAR_CLEARANCE
     )
     # server_wins: the push-back below writes every accepted edit into session
     # state before rerunning, so state is always the source of truth and the

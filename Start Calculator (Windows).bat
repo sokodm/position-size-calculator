@@ -33,7 +33,19 @@ set "PY_VERSION=3.12.14"
 set "PY_BUILD=20260901"
 set "PY_TRIPLE=x86_64-pc-windows-msvc"
 set "PY_SHA256=e90c1b6419da3bd812dd73bb3de40287a21abf153438147639ec5e20375ea93f"
-set "RUNTIME_DIR=%~dp0.runtime"
+REM Kept outside this folder, not beside it: python-build-standalone's own
+REM Lib\site-packages tree is nested deep enough that combining it with an
+REM arbitrarily long/nested project path can exceed Windows' ~260-character
+REM limit (the same OSError [WinError 206] this download exists to work
+REM around in the first place -- see run.py's venv_dir() for the matching
+REM fix on the venv side). LOCALAPPDATA is short and stable regardless of
+REM where this ZIP was extracted, and every copy of this app shares one
+REM download since the runtime itself holds no project-specific packages.
+if defined LOCALAPPDATA (
+    set "RUNTIME_DIR=%LOCALAPPDATA%\PSC\runtime"
+) else (
+    set "RUNTIME_DIR=%~dp0.runtime"
+)
 set "RUNTIME_PY=%RUNTIME_DIR%\python\python.exe"
 set "STAGING=%RUNTIME_DIR%\.download"
 set "PY_ARCHIVE=cpython-%PY_VERSION%+%PY_BUILD%-%PY_TRIPLE%-install_only.tar.gz"
@@ -48,6 +60,10 @@ set "VERCHECK=import sys; sys.exit(0 if (3, 10) <= sys.version_info < (3, 14) el
 REM Defaults to failure, so a path that somehow reaches :done without setting
 REM it reports a problem rather than a silent success.
 set "RUN_STATUS=1"
+REM Set below whenever "py"/"python" is actually found but fails VERCHECK, so
+REM :provision can tell "no Python on this PC" apart from "a Python is here,
+REM just not a supported version" instead of blaming the PC for both.
+set "PY_FOUND_BUT_INCOMPATIBLE=0"
 
 REM A copy downloaded on an earlier run wins over the system Python: run.py's
 REM .venv is bound to whichever interpreter created it, so quietly switching
@@ -71,6 +87,13 @@ py -3 -c "%VERCHECK%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "py -3 version check -> exit %EL%"
 if "%EL%"=="0" goto use_py
+REM 9009 is not "a real interpreter that's the wrong version" -- it's the exit
+REM code Windows' own Python "App Execution Alias" stub uses for "not really
+REM installed, run me with no args to get the Store page instead". Counting
+REM it as PY_FOUND_BUT_INCOMPATIBLE produced exactly the message a user hit in
+REM practice: "This PC has a Python installed, but not a version this app
+REM supports", when there was no real Python at all.
+if not "%EL%"=="9009" set "PY_FOUND_BUT_INCOMPATIBLE=1"
 
 :try_python
 where python >nul 2>nul
@@ -81,6 +104,8 @@ python -c "%VERCHECK%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "python version check -> exit %EL%"
 if "%EL%"=="0" goto use_python
+REM Same Store-alias-stub exception as the py -3 check above.
+if not "%EL%"=="9009" set "PY_FOUND_BUT_INCOMPATIBLE=1"
 
 :provision
 call :log "no usable Python found -- provisioning a private copy"
@@ -89,27 +114,67 @@ set "EL=%errorlevel%"
 call :log "where tar -> exit %EL%"
 if not "%EL%"=="0" goto no_tar
 
+if "%PY_FOUND_BUT_INCOMPATIBLE%"=="1" goto provision_incompatible
 echo This PC does not have Python, so the app will download its own copy
 echo (about 45 MB). It goes in this folder only -- nothing is installed
 echo system-wide, and no administrator password is needed.
 echo.
+goto provision_download
+
+:provision_incompatible
+echo This PC has a Python installed, but not a version this app supports
+echo (3.10 to 3.13), so it will download its own copy instead (about 45 MB).
+echo It goes in this folder only -- nothing is installed system-wide, and no
+echo administrator password is needed.
+echo.
+
+:provision_download
+REM Set before the staging check below, not after -- %DOWNLOAD_ATTEMPTS% is read
+REM by the :download_failed message, and that label is also reached directly
+REM from a failed mkdir a few lines down, before any later "set" would run.
+REM A one-off network hiccup or a corrupted-in-transit download shouldn't send
+REM someone straight to "install Python by hand" -- that message is for when
+REM retrying can't help, not for the common transient case. -TimeoutSec caps
+REM how long a stalled connection hangs before counting as a failed attempt.
+set "DOWNLOAD_ATTEMPTS=3"
+set "ATTEMPT=0"
 
 if exist "%STAGING%" rd /s /q "%STAGING%"
 mkdir "%STAGING%" 2>nul
 if not exist "%STAGING%" goto download_failed
 
-call :log "downloading %PY_URL%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; try { Invoke-WebRequest -Uri '%PY_URL%' -OutFile '%STAGING%\%PY_ARCHIVE%' -UseBasicParsing } catch { Write-Host $_.Exception.Message; exit 1 }" >>"%LOG%" 2>&1
+:download_attempt
+set /a ATTEMPT+=1
+if "%ATTEMPT%"=="1" echo Downloading Python -- about 45 MB...
+if not "%ATTEMPT%"=="1" echo Retrying download -- attempt %ATTEMPT% of %DOWNLOAD_ATTEMPTS%...
+call :log "downloading %PY_URL% (attempt %ATTEMPT%/%DOWNLOAD_ATTEMPTS%)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; try { Invoke-WebRequest -Uri '%PY_URL%' -OutFile '%STAGING%\%PY_ARCHIVE%' -UseBasicParsing -TimeoutSec 60 } catch { Write-Host $_.Exception.Message; exit 1 }" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
-call :log "download -> exit %EL%"
-if not "%EL%"=="0" goto download_failed
-if not exist "%STAGING%\%PY_ARCHIVE%" goto download_failed
+call :log "download attempt %ATTEMPT% -> exit %EL%"
+if not "%EL%"=="0" goto download_retry
+if not exist "%STAGING%\%PY_ARCHIVE%" goto download_retry
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$h = (Get-FileHash -Algorithm SHA256 '%STAGING%\%PY_ARCHIVE%').Hash.ToLower(); if ($h -ne '%PY_SHA256%') { Write-Host ('  expected: %PY_SHA256%'); Write-Host ('  received: ' + $h); exit 1 }"
 set "EL=%errorlevel%"
-call :log "checksum -> exit %EL%"
-if not "%EL%"=="0" goto checksum_failed
+call :log "checksum attempt %ATTEMPT% -> exit %EL%"
+if not "%EL%"=="0" goto checksum_retry
+goto provision_unpack
 
+:download_retry
+if exist "%STAGING%\%PY_ARCHIVE%" del /f /q "%STAGING%\%PY_ARCHIVE%" 2>nul
+if "%ATTEMPT%"=="%DOWNLOAD_ATTEMPTS%" goto download_failed
+echo   That attempt failed -- retrying in 5 seconds...
+timeout /t 5 /nobreak >nul
+goto download_attempt
+
+:checksum_retry
+del /f /q "%STAGING%\%PY_ARCHIVE%" 2>nul
+if "%ATTEMPT%"=="%DOWNLOAD_ATTEMPTS%" goto checksum_failed
+echo   That copy was corrupted in transit -- retrying in 5 seconds...
+timeout /t 5 /nobreak >nul
+goto download_attempt
+
+:provision_unpack
 tar -xf "%STAGING%\%PY_ARCHIVE%" -C "%STAGING%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "tar -xf -> exit %EL%"
@@ -181,14 +246,19 @@ call :log "tar is not available"
 goto manual
 
 :download_failed
-echo The download failed. Check your internet connection and try again.
-call :log "download failed"
+echo.
+echo The download failed %DOWNLOAD_ATTEMPTS% times in a row. Check your internet
+echo connection and try again -- most failures are a one-off network issue and
+echo work on the next attempt.
+call :log "download failed after %DOWNLOAD_ATTEMPTS% attempts"
 goto manual
 
 :checksum_failed
-echo The downloaded Python does not match its expected checksum, so it will
-echo not be used.
-call :log "checksum mismatch"
+echo.
+echo The downloaded Python was corrupted in transit %DOWNLOAD_ATTEMPTS% times in a
+echo row, so it will not be used. This is usually a flaky connection -- try
+echo again, ideally on a more stable network.
+call :log "checksum mismatch after %DOWNLOAD_ATTEMPTS% attempts"
 goto manual
 
 :unpack_failed
