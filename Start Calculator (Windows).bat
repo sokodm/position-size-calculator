@@ -145,15 +145,19 @@ if not exist "%STAGING%" goto download_failed
 
 :download_attempt
 set /a ATTEMPT+=1
-if "%ATTEMPT%"=="1" echo Downloading Python -- about 45 MB...
 if not "%ATTEMPT%"=="1" echo Retrying download -- attempt %ATTEMPT% of %DOWNLOAD_ATTEMPTS%...
 call :log "downloading %PY_URL% (attempt %ATTEMPT%/%DOWNLOAD_ATTEMPTS%)"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; try { Invoke-WebRequest -Uri '%PY_URL%' -OutFile '%STAGING%\%PY_ARCHIVE%' -UseBasicParsing -TimeoutSec 60 } catch { Write-Host $_.Exception.Message; exit 1 }" >>"%LOG%" 2>&1
+REM Not redirected to the log like the other PowerShell calls here: the whole
+REM point is a progress bar the person watching this window can see, and
+REM redirecting stdout would send that bar to the log file instead of the
+REM console. The script logs its own one-line outcome instead.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\download-python.ps1" -Url "%PY_URL%" -OutFile "%STAGING%\%PY_ARCHIVE%" -TimeoutSec 60 -LogFile "%LOG%"
 set "EL=%errorlevel%"
 call :log "download attempt %ATTEMPT% -> exit %EL%"
 if not "%EL%"=="0" goto download_retry
 if not exist "%STAGING%\%PY_ARCHIVE%" goto download_retry
 
+echo Verifying download...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$h = (Get-FileHash -Algorithm SHA256 '%STAGING%\%PY_ARCHIVE%').Hash.ToLower(); if ($h -ne '%PY_SHA256%') { Write-Host ('  expected: %PY_SHA256%'); Write-Host ('  received: ' + $h); exit 1 }"
 set "EL=%errorlevel%"
 call :log "checksum attempt %ATTEMPT% -> exit %EL%"
@@ -175,6 +179,7 @@ timeout /t 5 /nobreak >nul
 goto download_attempt
 
 :provision_unpack
+echo Unpacking Python...
 tar -xf "%STAGING%\%PY_ARCHIVE%" -C "%STAGING%" >>"%LOG%" 2>&1
 set "EL=%errorlevel%"
 call :log "tar -xf -> exit %EL%"
@@ -189,6 +194,7 @@ rd /s /q "%STAGING%"
 set "EL=%errorlevel%"
 call :log "new runtime version check -> exit %EL%"
 if not "%EL%"=="0" goto unpack_failed
+echo Python is ready.
 goto use_runtime
 
 :use_runtime
@@ -204,6 +210,7 @@ set PY_CMD=python
 goto run
 
 :run
+echo Setting up the app...
 REM Echoed directly rather than through :log -- PY_CMD is itself quoted when it
 REM holds a path, and nested quotes truncate a "call" argument. Delayed
 REM expansion for the same reason :log uses it, below.
