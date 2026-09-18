@@ -1603,6 +1603,15 @@ def compute_outputs(entry_price: float, atr_value: float, atr_multiple: float,
         return None
     stop_price = entry_price - stop_distance_dollars
     position_size_dollars = r_dollars / stop_distance_pct
+    # On a tight enough stop (short ATR timeframe, e.g. Hourly) the fixed
+    # dollar risk budget divided by a small stop_distance_pct can exceed the
+    # whole portfolio -- the formula alone doesn't know an account can't hold
+    # more than 100% of itself without margin. Clamping here means every
+    # dollar/percent field returned is already the position actually sized,
+    # not the pre-clamp math a caller would have to remember to re-check.
+    size_capped = position_size_dollars > portfolio_size
+    if size_capped:
+        position_size_dollars = portfolio_size
     position_size_pct = position_size_dollars / portfolio_size
     return {
         # A stop at or below zero is unplaceable, so the position has no
@@ -1612,6 +1621,7 @@ def compute_outputs(entry_price: float, atr_value: float, atr_multiple: float,
         # screen and name the multiple that would fix it. Equivalent to
         # stop_distance_pct >= 1, i.e. a stop a full 100% below entry.
         "stop_reachable": stop_price > 0,
+        "size_capped": size_capped,
         "r_dollars": r_dollars,
         "stop_distance_dollars": stop_distance_dollars,
         "stop_distance_pct": stop_distance_pct,
@@ -2963,6 +2973,16 @@ with st.sidebar:
     # hand on the control -- months later, with 20 positions loaded -- not in a
     # reference panel read once on day one.
     st.caption("Switching this re-fetches price & ATR for all saved positions.")
+    # Also visible, not tooltip content: this is the thing that actually
+    # explains a capped or oversized Position Size row, which otherwise looks
+    # like a bug (it was reported as one) rather than a mismatch between the
+    # chosen timeframe and how long the position is actually meant to be held.
+    st.caption(
+        "This also sets your stop distance: a shorter timeframe means a "
+        "tighter stop, and that only measures real risk if you'd actually "
+        "exit within it. If the stop ends up tighter than your Risk %, "
+        "Position Size is capped at 100% of your portfolio."
+    )
     if st.button(
         "🔄 Refresh Price & ATR",
         type="primary",
@@ -3606,6 +3626,15 @@ else:
                 row["Position Size (%)"] = outputs["position_size_pct"] * 100
                 row["Tranche Size ($)"] = outputs["tranche_size_dollars"]
                 row["Tranche Size (%)"] = outputs["tranche_size_pct"] * 100
+                if outputs["size_capped"]:
+                    warnings.append(
+                        f"**{_md_escape(pos['symbol'])}**: the ATR-based formula wanted a "
+                        f"position bigger than your whole ${_fmt_money(st.session_state.portfolio_size)} "
+                        f"portfolio (the stop is that tight on the {st.session_state.timeframe_label} "
+                        f"timeframe), so Position Size was capped at 100%. Lower Risk %, raise "
+                        f"ATR Multiple, or switch to a timeframe you'd actually hold through to "
+                        f"widen the stop instead."
+                    )
 
         rows.append(row)
 
@@ -3617,9 +3646,9 @@ else:
 
     df = pd.DataFrame(rows)
     PREFERRED_ORDER = [
-        "Symbol", "Asset Class",
+        "Symbol", "Asset Class", "Entry Price ($)",
         "Stop Price", "Position Size ($)", "Tranche Size ($)",
-        "Entry Price ($)", "ATR Multiple", "# Tranches",
+        "ATR Multiple", "# Tranches",
         "ATR", "Stop Dist (%)", "Position Size (%)", "Tranche Size (%)",
         "Date Added/Refreshed", "Exchange",
     ]
@@ -3636,6 +3665,57 @@ else:
             "function(params){ return (params.value === null || params.value === undefined) "
             "? '' : Number(params.value).toLocaleString('en-US', "
             f"{{minimumFractionDigits: {digits}, maximumFractionDigits: {digits}}}); }}"
+        )
+
+    def adaptive_price_formatter(sub_dollar_digits: int = 2, sig_figs: int = 4) -> JsCode:
+        # Per-unit prices span orders of magnitude (BTC ~$70,000 vs. VET
+        # ~$0.008). At $1 and above the whole-dollar figure already carries
+        # the meaningful precision, so cents are dropped entirely. Below $1
+        # the integer part is 0, so decimals are the only precision there
+        # is: maximumFractionDigits tracks the value's magnitude to keep
+        # ~sig_figs significant digits, while minimumFractionDigits stays
+        # pinned at sub_dollar_digits so toLocaleString trims real trailing
+        # zeros (0.0012, not 0.001200) instead of padding to the max.
+        return JsCode(
+            "function(params){"
+            "  var v = params.value;"
+            "  if (v === null || v === undefined) return '';"
+            "  var n = Number(v);"
+            "  if (n === 0 || Math.abs(n) >= 1) {"
+            "    return n.toLocaleString('en-US', "
+            "{minimumFractionDigits: 0, maximumFractionDigits: 0});"
+            "  }"
+            "  var magnitude = Math.floor(Math.log10(Math.abs(n)));"
+            "  var maxDigits = Math.min(10, " + str(sig_figs) + " - magnitude - 1);"
+            "  return n.toLocaleString('en-US', "
+            "{minimumFractionDigits: " + str(sub_dollar_digits) + ", maximumFractionDigits: maxDigits});"
+            "}"
+        )
+
+    def adaptive_atr_formatter(one_digit: int = 1, sig_figs: int = 4) -> JsCode:
+        # ATR is a volatility/distance measure, not a price level -- unlike Entry
+        # Price or Stop Price, a value >= 1 here is not "already big enough" to
+        # drop decimals. SOL and HYPE both had ATR ~1.23, which the shared
+        # adaptive_price_formatter's >=$1 rule rounded to a bare "1", erasing the
+        # exact number the stop-distance math is built on. At/above 1, one fixed
+        # decimal is enough (490.4, 1.2, 31.3); below 1 the integer part is 0, so
+        # decimals are the only precision there is -- VET's ATR of 0.0001 needs
+        # its own adaptive sig-fig handling or it collapses back to the original
+        # "shows as 0" bug this app started from.
+        return JsCode(
+            "function(params){"
+            "  var v = params.value;"
+            "  if (v === null || v === undefined) return '';"
+            "  var n = Number(v);"
+            "  if (n === 0 || Math.abs(n) >= 1) {"
+            "    return n.toLocaleString('en-US', "
+            "{minimumFractionDigits: " + str(one_digit) + ", maximumFractionDigits: " + str(one_digit) + "});"
+            "  }"
+            "  var magnitude = Math.floor(Math.log10(Math.abs(n)));"
+            "  var maxDigits = Math.min(10, " + str(sig_figs) + " - magnitude - 1);"
+            "  return n.toLocaleString('en-US', "
+            "{minimumFractionDigits: 2, maximumFractionDigits: maxDigits});"
+            "}"
         )
     HIGHLIGHT_STYLES = {
         "Stop Price": "function(params){ return {backgroundColor: '#ffe1e1', fontWeight: 'bold'}; }",
@@ -3657,16 +3737,28 @@ else:
     # Entry Price stays read-only on purpose: it comes from the live price
     # feed and "🔄 Refresh Price & ATR" is the way to update it.
     gb.configure_column("Entry Price ($)",
-                        type=["numericColumn"], valueFormatter=grid_formatter(2))
+                        type=["numericColumn"], valueFormatter=adaptive_price_formatter())
     gb.configure_column("ATR Multiple", header_name="✏️ ATR Multiple",
                         type=["numericColumn"], valueFormatter=grid_formatter(1), editable=True)
     gb.configure_column("# Tranches", header_name="✏️ # Tranches",
                         type=["numericColumn"], editable=True)
+    # Stop Price is a per-unit price, same magnitude range as Entry Price, so it
+    # gets the same $1-threshold adaptive formatter; everything else here is a
+    # dollar amount or percentage that doesn't need sub-cent precision. ATR gets
+    # its own formatter below -- it's a distance, not a price level, so the
+    # >=$1-drops-decimals rule doesn't apply to it.
+    ADAPTIVE_PRICE_COLS = {"Stop Price"}
     COLUMN_DIGITS = {
-        "ATR": 2, "Stop Price": 2, "Stop Dist (%)": 0,
+        "Stop Dist (%)": 0,
         "Position Size ($)": 0, "Position Size (%)": 2,
         "Tranche Size ($)": 0, "Tranche Size (%)": 2,
     }
+    for col in ADAPTIVE_PRICE_COLS:
+        gb.configure_column(
+            col, type=["numericColumn"], valueFormatter=adaptive_price_formatter(),
+            cellStyle=JsCode(HIGHLIGHT_STYLES[col]) if col in HIGHLIGHT_STYLES else None,
+        )
+    gb.configure_column("ATR", type=["numericColumn"], valueFormatter=adaptive_atr_formatter())
     for col, digits in COLUMN_DIGITS.items():
         gb.configure_column(
             col, type=["numericColumn"], valueFormatter=grid_formatter(digits),
