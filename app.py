@@ -125,6 +125,13 @@ ASSET_CLASSES = ["Crypto", "Stock", "Commodity"]
 ATR_MULTIPLE_MIN = 0.1
 ATR_MULTIPLE_STEP = 0.1
 
+# The grid editor's floor for a hand-corrected Entry Price. Strictly greater
+# than 0, matching every other entry_price>0 guard in this file (_valid_position,
+# max_safe_atr_multiple, compute_outputs) -- 0 or negative would pass this
+# component's own math (compute_outputs just returns None) but then fail
+# _valid_position on the next load, silently dropping the whole position.
+ENTRY_PRICE_MIN = 1e-8
+
 # Biggest/most-liquid venues first for each asset class. resolve_exchange_and_fetch()
 # tries the top 3 live, then up to 5 more from this list, until one actually lists
 # the symbol — no manual exchange entry needed.
@@ -312,6 +319,7 @@ def _valid_position(pos) -> dict | None:
     if not _finite_number(entry_price) or entry_price <= 0:
         return None
     atr_value = pos.get("atr_value")
+    current_price = pos.get("current_price")
     optional_text = ("exchange", "added_at", "display_name", "resolution_note",
                      "fetch_error")
     return {
@@ -327,6 +335,9 @@ def _valid_position(pos) -> dict | None:
         # of rejecting an otherwise perfectly usable position. atr_value is
         # legitimately absent when a fetch has never succeeded for this row.
         "atr_value": float(atr_value) if _finite_number(atr_value) else None,
+        # Also legitimately absent: a position saved before Current Price
+        # existed as its own field, or one whose only fetch ever failed.
+        "current_price": float(current_price) if _finite_number(current_price) else None,
         **{k: (pos[k] if isinstance(pos.get(k), str) else None) for k in optional_text},
     }
 
@@ -804,12 +815,16 @@ def _refresh_one(pos: dict, timeframe: str):
 
 
 def refresh_all_positions() -> None:
-    """Live-refresh price + ATR for every saved position (concurrently) and store
-    the results directly on each position dict, which save_state() persists to
-    positions.json. This is the ONLY place (besides adding a new position) that
-    calls TradingView for already-saved positions — the Positions table below
-    just reads these stored fields, so reloading the page or any other rerun
-    never triggers a network call."""
+    """Live-refresh current price + ATR for every saved position (concurrently)
+    and store the results directly on each position dict, which save_state()
+    persists to positions.json. This is the ONLY place (besides adding a new
+    position) that calls TradingView for already-saved positions — the
+    Positions table below just reads these stored fields, so reloading the
+    page or any other rerun never triggers a network call.
+
+    entry_price is untouched here on purpose -- it is the price the position
+    was bought at, not a live quote, so it is set once by add_position() and
+    never overwritten again."""
     positions = st.session_state.positions
     if not positions:
         st.session_state.last_refresh_changes = []
@@ -840,7 +855,12 @@ def refresh_all_positions() -> None:
         results = {pid: fut.result() for pid, fut in futures.items()}
     changes = []
     for pos in positions:
-        old_entry_price = pos.get("entry_price")
+        # entry_price is deliberately NOT snapshotted here -- unlike
+        # current_price/atr_value, refresh must never touch it. It is the
+        # price the position was actually bought at, and a live-price refresh
+        # silently overwriting that historical fact (the original bug report)
+        # is exactly what current_price now exists to avoid.
+        old_current_price = pos.get("current_price")
         old_atr_value = pos.get("atr_value")
         exchange, atr_info, error = results[pos["id"]]
         if atr_info is not None:
@@ -850,18 +870,18 @@ def refresh_all_positions() -> None:
             pos["exchange"] = exchange
             pos["atr_value"] = atr_info["atr_value"]
             if atr_info["current_price"] is not None:
-                pos["entry_price"] = atr_info["current_price"]
+                pos["current_price"] = atr_info["current_price"]
             pos["resolution_note"] = atr_info["resolution_note"]
             pos["fetch_error"] = None
             pos["added_at"] = datetime.now().strftime("%Y-%m-%d, %I:%M:%S %p")
         else:
-            # Keep the last known good atr_value/entry_price (stale but usable)
-            # instead of blanking the row on a transient TradingView failure.
+            # Keep the last known good atr_value/current_price (stale but
+            # usable) instead of blanking the row on a transient failure.
             pos["fetch_error"] = error.get("message", str(error)) if error else "Unknown error"
-        if pos.get("entry_price") != old_entry_price or pos.get("atr_value") != old_atr_value:
+        if pos.get("current_price") != old_current_price or pos.get("atr_value") != old_atr_value:
             changes.append({
                 "id": pos["id"], "symbol": pos["symbol"],
-                "old_entry_price": old_entry_price, "new_entry_price": pos.get("entry_price"),
+                "old_current_price": old_current_price, "new_current_price": pos.get("current_price"),
                 "old_atr_value": old_atr_value, "new_atr_value": pos.get("atr_value"),
             })
     st.session_state.last_refresh_changes = changes
@@ -1393,6 +1413,7 @@ def add_position(match: dict) -> None:
         "asset_class": match["asset_class"],
         "exchange": match["exchange"],
         "entry_price": atr_info["current_price"],
+        "current_price": atr_info["current_price"],
         "atr_value": atr_info["atr_value"],
         "display_name": match.get("display_name"),
         "resolution_note": atr_info["resolution_note"],
@@ -2681,9 +2702,23 @@ if st.session_state.get("load_error"):
 # (an expander, or st.popover), which is a design decision about the one-tooltip
 # rule and not a rewording of this comment.
 HELP_BODY = (
+    "- **Entry Price** — the price you actually bought at. Set once when you "
+    "add the position and never touched by refresh — but double-click the "
+    "cell to correct it by hand if your real fill price differed.\n"
+    "- **Current Price** — the live market price, updated by \"🔄 Refresh "
+    "Price & ATR\". Stop Price and sizing are still calculated from the fixed "
+    "Entry Price, not this.\n"
+    "- **P&L (%)** — price return since entry: (Current − Entry) ÷ Entry. Not "
+    "a dollar figure — Position Size recalculates from live ATR rather than "
+    "recording what you actually deployed, so a dollar P&L built on it would "
+    "drift for reasons that have nothing to do with the market.\n"
     "- **ATR (Average True Range, 14-period)** — TradingView's average of each "
     "bar's true trading range on the selected timeframe. Hourly, Daily and "
     "Weekly measure typical hour-, day-, or week-sized moves.\n"
+    "- **ATR Timeframe** — also sets your stop distance: a shorter timeframe "
+    "means a tighter stop, and that only measures real risk if you'd actually "
+    "exit within it. If the stop ends up tighter than your Risk %, Position "
+    "Size is capped at 100% of your portfolio.\n"
     "- **ATR multiple** — how many ATRs below entry the stop goes. Bigger = a "
     "wider stop and a smaller position for the same risk.\n"
     "- **Stop distance** = ATR × ATR multiple. Stop price = entry − stop distance.\n"
@@ -2713,8 +2748,9 @@ HELP_BODY = (
     "biggest venues first — within the selected Asset Class.\n"
     "\n"
     "**Live data**\n"
-    "Price & ATR are pulled from TradingView when a position is added and on "
-    "every refresh. The table shows the last refresh, not a live feed.\n"
+    "Current Price & ATR are pulled from TradingView when a position is added "
+    "and on every refresh — Entry Price only on add. The table shows the last "
+    "refresh, not a live feed.\n"
     "\n"
     "**Settings apply instantly**\n"
     "Portfolio Size and Risk (%) re-compute every saved position about a second "
@@ -2972,17 +3008,7 @@ with st.sidebar:
     # re-pulls price & ATR for every saved position, and that is needed with a
     # hand on the control -- months later, with 20 positions loaded -- not in a
     # reference panel read once on day one.
-    st.caption("Switching this re-fetches price & ATR for all saved positions.")
-    # Also visible, not tooltip content: this is the thing that actually
-    # explains a capped or oversized Position Size row, which otherwise looks
-    # like a bug (it was reported as one) rather than a mismatch between the
-    # chosen timeframe and how long the position is actually meant to be held.
-    st.caption(
-        "This also sets your stop distance: a shorter timeframe means a "
-        "tighter stop, and that only measures real risk if you'd actually "
-        "exit within it. If the stop ends up tighter than your Risk %, "
-        "Position Size is capped at 100% of your portfolio."
-    )
+    st.caption("Switching this re-fetches Current Price & ATR for all saved positions.")
     if st.button(
         "🔄 Refresh Price & ATR",
         type="primary",
@@ -3510,14 +3536,21 @@ change_rows = []
 for c in st.session_state.get("last_refresh_changes") or []:
     if c["id"] not in current_ids:
         continue
-    if c["old_entry_price"] == c["new_entry_price"] and c["old_atr_value"] == c["new_atr_value"]:
+    if c["old_current_price"] == c["new_current_price"] and c["old_atr_value"] == c["new_atr_value"]:
         continue
+    # Any of these four can be None: a position whose first-ever fetch is the
+    # refresh being reported (or one saved before Current Price existed as its
+    # own field) has no "old" value, and a refresh that got ATR but not a
+    # price back (fetch_atr allows that split) leaves current_price at its
+    # prior value -- None, if that's what it already was.
+    old_price, new_price = c["old_current_price"], c["new_current_price"]
+    old_atr, new_atr = c["old_atr_value"], c["new_atr_value"]
     change_rows.append({
         "Symbol": format_symbol_display(c["symbol"], positions_by_id[c["id"]]["asset_class"]),
-        "Old Entry Price ($)": f"{c['old_entry_price']:,.2f}",
-        "New Entry Price ($)": f"{c['new_entry_price']:,.2f}",
-        "Old ATR": f"{c['old_atr_value']:,.2f}",
-        "New ATR": f"{c['new_atr_value']:,.2f}",
+        "Old Current Price ($)": f"{old_price:,.2f}" if old_price is not None else "—",
+        "New Current Price ($)": f"{new_price:,.2f}" if new_price is not None else "—",
+        "Old ATR": f"{old_atr:,.2f}" if old_atr is not None else "—",
+        "New ATR": f"{new_atr:,.2f}" if new_atr is not None else "—",
     })
 if SHOW_LAST_REFRESH_CHANGES and change_rows:
     st.markdown("🔄 **Changed on last refresh:**")
@@ -3557,6 +3590,17 @@ else:
             "Exchange": pos.get("exchange"),
             "Date Added/Refreshed": pos.get("added_at"),
             "Entry Price ($)": pos["entry_price"],
+            "Current Price ($)": pos.get("current_price"),
+            # Price return only -- not a dollar P&L. A dollar figure would have
+            # to multiply by Position Size, which recomputes from live ATR on
+            # every refresh rather than recording what was actually deployed,
+            # so it would drift for reasons that have nothing to do with the
+            # market. None (not 0) when current_price hasn't been fetched yet,
+            # so it renders blank instead of a false "unchanged."
+            "P&L (%)": (
+                (pos["current_price"] - pos["entry_price"]) / pos["entry_price"] * 100
+                if pos.get("current_price") is not None else None
+            ),
             "ATR Multiple": pos["atr_multiple"],
             "# Tranches": pos["tranches"],
         }
@@ -3646,7 +3690,7 @@ else:
 
     df = pd.DataFrame(rows)
     PREFERRED_ORDER = [
-        "Symbol", "Asset Class", "Entry Price ($)",
+        "Symbol", "Asset Class", "Entry Price ($)", "Current Price ($)", "P&L (%)",
         "Stop Price", "Position Size ($)", "Tranche Size ($)",
         "ATR Multiple", "# Tranches",
         "ATR", "Stop Dist (%)", "Position Size (%)", "Tranche Size (%)",
@@ -3669,21 +3713,29 @@ else:
 
     def adaptive_price_formatter(sub_dollar_digits: int = 2, sig_figs: int = 4) -> JsCode:
         # Per-unit prices span orders of magnitude (BTC ~$70,000 vs. VET
-        # ~$0.008). At $1 and above the whole-dollar figure already carries
-        # the meaningful precision, so cents are dropped entirely. Below $1
-        # the integer part is 0, so decimals are the only precision there
-        # is: maximumFractionDigits tracks the value's magnitude to keep
-        # ~sig_figs significant digits, while minimumFractionDigits stays
-        # pinned at sub_dollar_digits so toLocaleString trims real trailing
-        # zeros (0.0012, not 0.001200) instead of padding to the max.
+        # ~$0.008), and no single decimal count works everywhere:
+        #   >= $1,000  -- whole dollars are precise enough (BTC, ZEC).
+        #   $10-$1,000 -- fixed 2 decimals (HYPE $94.22, SOL $112.54). A flat
+        #                 0-decimals cutoff here used to start at $10, but that
+        #                 threw away real precision for anything merely in the
+        #                 tens/hundreds, not just BTC-scale prices.
+        #   < $10      -- adaptive sig-figs (still trimming real trailing
+        #                 zeros, e.g. 0.0012 not 0.001200), which is what fixed
+        #                 CAKE's $2.609 rounding to a bare "3" (a $1 cutoff was
+        #                 too low -- a dollar is a much bigger fraction of
+        #                 $2.61 than of $94) and VET's sub-cent prices.
         return JsCode(
             "function(params){"
             "  var v = params.value;"
             "  if (v === null || v === undefined) return '';"
             "  var n = Number(v);"
-            "  if (n === 0 || Math.abs(n) >= 1) {"
+            "  if (n === 0 || Math.abs(n) >= 1000) {"
             "    return n.toLocaleString('en-US', "
             "{minimumFractionDigits: 0, maximumFractionDigits: 0});"
+            "  }"
+            "  if (Math.abs(n) >= 10) {"
+            "    return n.toLocaleString('en-US', "
+            "{minimumFractionDigits: " + str(sub_dollar_digits) + ", maximumFractionDigits: " + str(sub_dollar_digits) + "});"
             "  }"
             "  var magnitude = Math.floor(Math.log10(Math.abs(n)));"
             "  var maxDigits = Math.min(10, " + str(sig_figs) + " - magnitude - 1);"
@@ -3694,20 +3746,28 @@ else:
 
     def adaptive_atr_formatter(one_digit: int = 1, sig_figs: int = 4) -> JsCode:
         # ATR is a volatility/distance measure, not a price level -- unlike Entry
-        # Price or Stop Price, a value >= 1 here is not "already big enough" to
-        # drop decimals. SOL and HYPE both had ATR ~1.23, which the shared
-        # adaptive_price_formatter's >=$1 rule rounded to a bare "1", erasing the
-        # exact number the stop-distance math is built on. At/above 1, one fixed
-        # decimal is enough (490.4, 1.2, 31.3); below 1 the integer part is 0, so
-        # decimals are the only precision there is -- VET's ATR of 0.0001 needs
-        # its own adaptive sig-fig handling or it collapses back to the original
-        # "shows as 0" bug this app started from.
+        # Price or Stop Price, a value >= 1 here is not automatically "already
+        # big enough" to drop decimals: SOL and HYPE both had ATR ~1.23, which
+        # the shared adaptive_price_formatter's >=$1 rule rounded to a bare
+        # "1", erasing the exact number the stop-distance math is built on. But
+        # once ATR reaches double digits (BTC 5,937.8, ZEC 176.4), the single
+        # decimal carries no real information either -- same reasoning as the
+        # price formatter's $10 threshold. So: >=10 drops decimals entirely;
+        # [1, 10) keeps exactly one decimal, which is what actually fixed the
+        # SOL/HYPE bug; below 1 the integer part is 0, so decimals are the only
+        # precision there is -- VET's ATR of 0.0001 needs its own adaptive
+        # sig-fig handling or it collapses back to the original "shows as 0"
+        # bug this app started from.
         return JsCode(
             "function(params){"
             "  var v = params.value;"
             "  if (v === null || v === undefined) return '';"
             "  var n = Number(v);"
-            "  if (n === 0 || Math.abs(n) >= 1) {"
+            "  if (n === 0 || Math.abs(n) >= 10) {"
+            "    return n.toLocaleString('en-US', "
+            "{minimumFractionDigits: 0, maximumFractionDigits: 0});"
+            "  }"
+            "  if (Math.abs(n) >= 1) {"
             "    return n.toLocaleString('en-US', "
             "{minimumFractionDigits: " + str(one_digit) + ", maximumFractionDigits: " + str(one_digit) + "});"
             "  }"
@@ -3717,6 +3777,31 @@ else:
             "{minimumFractionDigits: 2, maximumFractionDigits: maxDigits});"
             "}"
         )
+    def pnl_formatter() -> JsCode:
+        # A leading "+" on gains, matching every trading platform's P&L
+        # convention -- toLocaleString already supplies "-" for losses, so
+        # only the positive case needs the sign added by hand.
+        return JsCode(
+            "function(params){"
+            "  var v = params.value;"
+            "  if (v === null || v === undefined) return '';"
+            "  var n = Number(v);"
+            "  var s = n.toLocaleString('en-US', "
+            "{minimumFractionDigits: 2, maximumFractionDigits: 2});"
+            "  return (n > 0 ? '+' : '') + s;"
+            "}"
+        )
+
+    PNL_CELL_STYLE = JsCode(
+        "function(params){"
+        "  var v = params.value;"
+        "  if (v === null || v === undefined) return null;"
+        "  if (v > 0) return {color: '#1a7f37', fontWeight: 'bold'};"
+        "  if (v < 0) return {color: '#c62828', fontWeight: 'bold'};"
+        "  return null;"
+        "}"
+    )
+
     HIGHLIGHT_STYLES = {
         "Stop Price": "function(params){ return {backgroundColor: '#ffe1e1', fontWeight: 'bold'}; }",
         "Position Size ($)": "function(params){ return {backgroundColor: '#e1f7e1', fontWeight: 'bold'}; }",
@@ -3734,20 +3819,27 @@ else:
     # column name, so the edited_row[...] push-back below and _FIT_COLUMNS_JS
     # are unaffected. The ✏️ marks the editable columns (nothing else
     # visually distinguishes them from read-only cells -- UX review).
-    # Entry Price stays read-only on purpose: it comes from the live price
-    # feed and "🔄 Refresh Price & ATR" is the way to update it.
-    gb.configure_column("Entry Price ($)",
-                        type=["numericColumn"], valueFormatter=adaptive_price_formatter())
+    # Entry Price is editable for a different reason than ATR Multiple/#
+    # Tranches below: it is the price the position was actually bought at, set
+    # once by add_position() from the live quote at search time -- but a real
+    # fill can land at a different price (slippage, a limit order, entering
+    # the trade after the fact), so the user can correct it by hand. Refresh
+    # never touches it either way; only Current Price and ATR are live. See
+    # refresh_all_positions()'s docstring for why.
+    gb.configure_column("Entry Price ($)", header_name="✏️ Entry Price ($)",
+                        type=["numericColumn"], valueFormatter=adaptive_price_formatter(),
+                        editable=True)
     gb.configure_column("ATR Multiple", header_name="✏️ ATR Multiple",
                         type=["numericColumn"], valueFormatter=grid_formatter(1), editable=True)
     gb.configure_column("# Tranches", header_name="✏️ # Tranches",
                         type=["numericColumn"], editable=True)
-    # Stop Price is a per-unit price, same magnitude range as Entry Price, so it
-    # gets the same $1-threshold adaptive formatter; everything else here is a
-    # dollar amount or percentage that doesn't need sub-cent precision. ATR gets
-    # its own formatter below -- it's a distance, not a price level, so the
-    # >=$1-drops-decimals rule doesn't apply to it.
-    ADAPTIVE_PRICE_COLS = {"Stop Price"}
+    # Current Price and Stop Price are both per-unit prices, same magnitude
+    # range as Entry Price, so they get the same $10-threshold adaptive
+    # formatter; everything else here is a dollar amount or percentage that
+    # doesn't need sub-cent precision. ATR gets its own formatter below -- it's
+    # a distance, not a price level, so the >=$10-drops-decimals rule doesn't
+    # apply to it.
+    ADAPTIVE_PRICE_COLS = {"Current Price ($)", "Stop Price"}
     COLUMN_DIGITS = {
         "Stop Dist (%)": 0,
         "Position Size ($)": 0, "Position Size (%)": 2,
@@ -3759,6 +3851,8 @@ else:
             cellStyle=JsCode(HIGHLIGHT_STYLES[col]) if col in HIGHLIGHT_STYLES else None,
         )
     gb.configure_column("ATR", type=["numericColumn"], valueFormatter=adaptive_atr_formatter())
+    gb.configure_column("P&L (%)", type=["numericColumn"],
+                        valueFormatter=pnl_formatter(), cellStyle=PNL_CELL_STYLE)
     for col, digits in COLUMN_DIGITS.items():
         gb.configure_column(
             col, type=["numericColumn"], valueFormatter=grid_formatter(digits),
@@ -3862,6 +3956,15 @@ else:
         "}, 0); }"
     )
     gb.configure_grid_options(
+        # AG-Grid's default: cells behave like a spreadsheet widget (click to
+        # focus/select the row) rather than selectable text, so a normal
+        # click-drag or Ctrl+C over a cell does nothing -- this is AG-Grid's
+        # own built-in behavior, not something this app's CSS or config
+        # suppressed. ensureDomOrder keeps the DOM's row order matching the
+        # visual (sorted) order, which enableCellTextSelection needs to
+        # produce a selection that matches what's actually on screen.
+        enableCellTextSelection=True,
+        ensureDomOrder=True,
         onCellEditingStarted=_AUTO_COMMIT_EDIT_JS,
         # Deliberately NO getRowId here: st_aggrid injects a hidden
         # ::auto_unique_id:: column and wires its own getRowId to it, which
@@ -4042,9 +4145,48 @@ else:
     # frame via CSS, so this native button replaces it, sitting in normal page
     # flow right below the grid.
     export_df = df[display_cols].copy()
+
+    def _adaptive_round_price(v):
+        # Flat round(2) on a per-unit price is the same bug the on-screen
+        # adaptive_price_formatter was built to fix (app.py:3713), just in the
+        # CSV path instead of AgGrid's JS: VET's real 0.0086 rounded to 0.01 --
+        # a ~16% distortion -- because a fixed 2 decimals is calibrated for
+        # BTC-scale prices, not VET-scale ones. Mirrors that JS formatter's
+        # three tiers: >=1,000 whole dollars, $10-$1,000 fixed 2 decimals,
+        # below $10 adaptive sig-figs.
+        if pd.isna(v):
+            return v
+        v = float(v)
+        if v == 0 or abs(v) >= 1000:
+            return round(v)
+        if abs(v) >= 10:
+            return round(v, 2)
+        magnitude = math.floor(math.log10(abs(v)))
+        return round(v, min(10, 4 - magnitude - 1))
+
+    def _adaptive_round_atr(v):
+        # Same fix as _adaptive_round_price, mirroring adaptive_atr_formatter
+        # (app.py:3739) instead: VET's real ATR of 0.0011 rounded to 0.0 under
+        # flat round(2) -- reintroducing, in the CSV, the exact "ATR shows as
+        # 0" bug this whole file's on-screen formatting was built to fix.
+        if pd.isna(v):
+            return v
+        v = float(v)
+        if v == 0 or abs(v) >= 10:
+            return round(v)
+        if abs(v) >= 1:
+            return round(v, 1)
+        magnitude = math.floor(math.log10(abs(v)))
+        return round(v, min(10, 4 - magnitude - 1))
+
+    adaptive_price_cols = [c for c in ["Entry Price ($)", "Current Price ($)", "Stop Price"]
+                          if c in export_df.columns]
+    for col in adaptive_price_cols:
+        export_df[col] = export_df[col].map(_adaptive_round_price)
+    if "ATR" in export_df.columns:
+        export_df["ATR"] = export_df["ATR"].map(_adaptive_round_atr)
     two_decimal_cols = [c for c in [
-        "Stop Price", "Position Size ($)", "Tranche Size ($)",
-        "Entry Price ($)", "ATR Multiple", "ATR",
+        "Position Size ($)", "Tranche Size ($)", "P&L (%)", "ATR Multiple",
         "Stop Dist (%)", "Position Size (%)", "Tranche Size (%)",
     ] if c in export_df.columns]
     export_df[two_decimal_cols] = export_df[two_decimal_cols].round(2)
@@ -4056,9 +4198,9 @@ else:
         export_df[_col] = export_df[_col].map(_csv_safe)
     caption_col, download_col = st.columns([9, 1], vertical_alignment="center")
     caption_col.caption(
-        "✏️ Double-click an ATR Multiple or # Tranches cell to edit it — "
-        "changes apply automatically. To delete a position, click the "
-        "checkbox at the start of its row."
+        "✏️ Double-click an Entry Price, ATR Multiple, or # Tranches cell to "
+        "edit it — changes apply automatically. To delete a position, click "
+        "the checkbox at the start of its row."
     )
     download_col.download_button(
         "⬇️ CSV", data=export_df.to_csv(index=False), file_name="positions.csv",
@@ -4075,7 +4217,7 @@ else:
     # fingerprint gate below toasts each distinct rejection once.
     rejection_msgs = []
 
-    def _cell_value(raw, cast, fallback, label, symbol, minimum=None):
+    def _cell_value(raw, cast, fallback, label, symbol, minimum=None, minimum_label=None):
         # Grid cells are free-text editors, and auto-commit can now close an
         # editor mid-retype (same hazard as the sidebar fields): an emptied or
         # unparseable cell comes back as ""/None/NaN, which float()/int() would
@@ -4114,8 +4256,9 @@ else:
         # >= 1) -- the grid editor is the only other write path and accepted
         # 0/negatives, which just blank out every derived column.
         if minimum is not None and value < minimum:
+            requirement = minimum_label if minimum_label is not None else f"at least {minimum}"
             rejection_msgs.append(
-                f"{_md_escape(symbol)}: {label} must be at least {minimum} — kept {fallback}")
+                f"{_md_escape(symbol)}: {label} must be {requirement} — kept {fallback}")
             return fallback
         return value
 
@@ -4144,19 +4287,25 @@ else:
             new_tranches = _cell_value(
                 edited_row["# Tranches"], lambda v: int(float(v)), pos["tranches"], "# Tranches",
                 pos["symbol"], minimum=1)
-            if new_multiple != pos["atr_multiple"] or new_tranches != pos["tranches"]:
+            new_entry_price = _cell_value(
+                edited_row["Entry Price ($)"], float, pos["entry_price"], "Entry Price ($)",
+                pos["symbol"], minimum=ENTRY_PRICE_MIN, minimum_label="greater than 0")
+            if new_multiple != pos["atr_multiple"] or new_tranches != pos["tranches"] \
+                    or new_entry_price != pos["entry_price"]:
                 pos["atr_multiple"] = new_multiple
                 pos["tranches"] = new_tranches
+                pos["entry_price"] = new_entry_price
                 changed = True
             resync = resync or _display_differs(edited_row["ATR Multiple"], new_multiple) \
-                or _display_differs(edited_row["# Tranches"], new_tranches)
+                or _display_differs(edited_row["# Tranches"], new_tranches) \
+                or _display_differs(edited_row["Entry Price ($)"], new_entry_price)
         if rejection_msgs:
             # Toast each distinct rejected payload once. Replays of the same
             # stale payload on later reruns re-reject silently (the guarded
             # resync below still repaints the grid, so the display stays
             # right); a different bad value or a valid edit resets the gate.
             fingerprint = tuple(
-                (pid, str(row["ATR Multiple"]), str(row["# Tranches"]))
+                (pid, str(row["ATR Multiple"]), str(row["# Tranches"]), str(row["Entry Price ($)"]))
                 for pid, row in edited_by_id.items()
             )
             if st.session_state.get("last_rejection_fp") != fingerprint:
