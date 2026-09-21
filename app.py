@@ -3956,6 +3956,15 @@ else:
         "}, 0); }"
     )
     gb.configure_grid_options(
+        # AG-Grid's default: cells behave like a spreadsheet widget (click to
+        # focus/select the row) rather than selectable text, so a normal
+        # click-drag or Ctrl+C over a cell does nothing -- this is AG-Grid's
+        # own built-in behavior, not something this app's CSS or config
+        # suppressed. ensureDomOrder keeps the DOM's row order matching the
+        # visual (sorted) order, which enableCellTextSelection needs to
+        # produce a selection that matches what's actually on screen.
+        enableCellTextSelection=True,
+        ensureDomOrder=True,
         onCellEditingStarted=_AUTO_COMMIT_EDIT_JS,
         # Deliberately NO getRowId here: st_aggrid injects a hidden
         # ::auto_unique_id:: column and wires its own getRowId to it, which
